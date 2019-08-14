@@ -18,8 +18,12 @@ package com.navercorp.pinpoint.collector.receiver.grpc.service;
 
 import com.navercorp.pinpoint.collector.receiver.DispatchHandler;
 import com.navercorp.pinpoint.grpc.MessageFormatUtils;
+import com.navercorp.pinpoint.grpc.StatusError;
+import com.navercorp.pinpoint.grpc.StatusErrors;
+import com.navercorp.pinpoint.grpc.server.lifecycle.PingEventHandler;
 import com.navercorp.pinpoint.grpc.trace.AgentGrpc;
 import com.navercorp.pinpoint.grpc.trace.PAgentInfo;
+import com.navercorp.pinpoint.grpc.trace.PPing;
 import com.navercorp.pinpoint.grpc.trace.PResult;
 import com.navercorp.pinpoint.io.header.Header;
 import com.navercorp.pinpoint.io.header.HeaderEntity;
@@ -32,18 +36,25 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * @author jaehong.kim
  */
 public class AgentService extends AgentGrpc.AgentImplBase {
+
+    private static final AtomicLong idAllocator = new AtomicLong();
     private final Logger logger = LoggerFactory.getLogger(this.getClass());
     private final boolean isDebug = logger.isDebugEnabled();
-
     private final SimpleRequestHandlerAdaptor<PResult> simpleRequestHandlerAdaptor;
+    private final PingEventHandler pingEventHandler;
 
-    public AgentService(DispatchHandler dispatchHandler) {
-        this.simpleRequestHandlerAdaptor = new SimpleRequestHandlerAdaptor<>(this.getClass().getName(), dispatchHandler);
+    public AgentService(DispatchHandler dispatchHandler, PingEventHandler pingEventHandler) {
+        this.simpleRequestHandlerAdaptor = new SimpleRequestHandlerAdaptor<PResult>(this.getClass().getName(), dispatchHandler);
+        this.pingEventHandler = Objects.requireNonNull(pingEventHandler, "pingEventHandler must not be null");
+
     }
 
     @Override
@@ -57,6 +68,64 @@ public class AgentService extends AgentGrpc.AgentImplBase {
         simpleRequestHandlerAdaptor.request(message, responseObserver);
     }
 
+
+    @Override
+    public StreamObserver<PPing> pingSession(final StreamObserver<PPing> responseObserver) {
+        final StreamObserver<PPing> request = new StreamObserver<PPing>() {
+            private final AtomicBoolean first = new AtomicBoolean(false);
+            private final long id = nextSessionId();
+            @Override
+            public void onNext(PPing ping) {
+                if (first.compareAndSet(false, true)) {
+                    if (isDebug) {
+                        logger.debug("PingSession:{} start:{}", id, MessageFormatUtils.debugLog(ping));
+                    }
+                    AgentService.this.pingEventHandler.connect();
+                }
+                if (isDebug) {
+                    logger.debug("PingSession:{} onNext:{}", id, MessageFormatUtils.debugLog(ping));
+                }
+                PPing replay = newPing();
+                responseObserver.onNext(replay);
+                AgentService.this.pingEventHandler.ping();
+            }
+
+            private PPing newPing() {
+                PPing.Builder builder = PPing.newBuilder();
+                return builder.build();
+            }
+
+            @Override
+            public void onError(Throwable t) {
+                final StatusError statusError = StatusErrors.throwable(t);
+                if (statusError.isSimpleError()) {
+                    logger.info("Failed to ping stream, id={}, cause={}", id, statusError.getMessage());
+                } else {
+                    logger.warn("Failed to ping stream, id={}, cause={}", id, statusError.getMessage(), statusError.getThrowable());
+                }
+                disconnect();
+            }
+
+            @Override
+            public void onCompleted() {
+                if (isDebug) {
+                    logger.debug("PingSession:{} onCompleted()", id);
+                }
+                responseObserver.onCompleted();
+                disconnect();
+            }
+
+            private void disconnect() {
+                AgentService.this.pingEventHandler.close();
+            }
+
+        };
+        return request;
+    }
+
+    private long nextSessionId() {
+        return idAllocator.getAndIncrement();
+    }
 
     private <T> Message<T> newMessage(T requestData, short type) {
         final Header header = new HeaderV2(Header.SIGNATURE, HeaderV2.VERSION, type);

@@ -25,6 +25,9 @@ import com.navercorp.pinpoint.collector.receiver.grpc.PinpointGrpcServer;
 import com.navercorp.pinpoint.collector.receiver.grpc.PinpointGrpcServerRepository;
 import com.navercorp.pinpoint.common.util.Assert;
 import com.navercorp.pinpoint.grpc.AgentHeaderFactory;
+import com.navercorp.pinpoint.grpc.Header;
+import com.navercorp.pinpoint.grpc.StatusError;
+import com.navercorp.pinpoint.grpc.StatusErrors;
 import com.navercorp.pinpoint.grpc.server.ServerContext;
 import com.navercorp.pinpoint.grpc.server.TransportMetadata;
 import com.navercorp.pinpoint.grpc.trace.PCmdActiveThreadCountRes;
@@ -125,13 +128,20 @@ public class GrpcCommandService extends ProfilerCommandServiceGrpc.ProfilerComma
 
             @Override
             public void onError(Throwable t) {
-                logger.info("{} => local. onError:{}", getAgentInfo().getAgentKey(), t.getMessage(), t);
+                final StatusError statusError = StatusErrors.throwable(t);
+                if (statusError.isSimpleError()) {
+                    logger.info("Failed to command stream, {} => local, cause={}", getAgentInfo().getAgentKey(), statusError.getMessage());
+                } else {
+                    logger.warn("Failed to command stream, {} => local, cause={}", getAgentInfo().getAgentKey(), statusError.getMessage(), statusError.getThrowable());
+                }
                 pinpointGrpcServer.disconnected();
             }
 
             @Override
             public void onCompleted() {
-                logger.info("{} => local. onCompleted", getAgentInfo().getAgentKey());
+                if (logger.isDebugEnabled()) {
+                    logger.debug("{} => local. onCompleted", getAgentInfo().getAgentKey());
+                }
                 pinpointGrpcServer.disconnected();
             }
 
@@ -206,7 +216,7 @@ public class GrpcCommandService extends ProfilerCommandServiceGrpc.ProfilerComma
     }
 
     private AgentInfo getAgentInfo() {
-        AgentHeaderFactory.Header header = ServerContext.getAgentInfo();
+        Header header = ServerContext.getAgentInfo();
         return new AgentInfo(header.getApplicationName(), header.getAgentId(), header.getAgentStartTime());
     }
 

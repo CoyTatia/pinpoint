@@ -16,75 +16,102 @@
 
 package com.navercorp.pinpoint.profiler.sender.grpc;
 
+
+import com.navercorp.pinpoint.common.util.Assert;
+import com.navercorp.pinpoint.grpc.client.ChannelFactoryOption;
+
 import com.google.protobuf.Empty;
-import com.navercorp.pinpoint.grpc.HeaderFactory;
+
 import com.navercorp.pinpoint.grpc.trace.PAgentStat;
 import com.navercorp.pinpoint.grpc.trace.PAgentStatBatch;
+import com.navercorp.pinpoint.grpc.trace.PStatMessage;
 import com.navercorp.pinpoint.grpc.trace.StatGrpc;
 import com.navercorp.pinpoint.profiler.context.thrift.MessageConverter;
 
 import com.google.protobuf.GeneratedMessageV3;
-import io.grpc.NameResolverProvider;
 import io.grpc.stub.StreamObserver;
+
+import java.util.concurrent.RejectedExecutionException;
+
+import static com.navercorp.pinpoint.grpc.MessageFormatUtils.debugLog;
 
 /**
  * @author jaehong.kim
  */
 public class StatGrpcDataSender extends GrpcDataSender {
     private final StatGrpc.StatStub statStub;
+    private final ReconnectExecutor reconnectExecutor;
 
-    private volatile StreamObserver<PAgentStat> statStream;
-    private final ReconnectJob statStreamReconnectAction;
+    private volatile StreamObserver<PStatMessage> statStream;
+    private final Reconnector statStreamReconnector;
 
-    private volatile StreamObserver<PAgentStatBatch> statBatchStream;
-    private final ReconnectJob statBatchStreamReconnectAction;
-
-    public StatGrpcDataSender(String name, String host, int port, MessageConverter<GeneratedMessageV3> messageConverter, HeaderFactory headerFactory, NameResolverProvider nameResolverProvider) {
-        super(name, host, port, messageConverter, headerFactory, nameResolverProvider);
+    public StatGrpcDataSender(String host, int port,
+                              int senderExecutorQueueSize,
+                              MessageConverter<GeneratedMessageV3> messageConverter,
+                              ReconnectExecutor reconnectExecutor,
+                              ChannelFactoryOption channelFactoryOption) {
+        super(host, port, senderExecutorQueueSize, messageConverter, channelFactoryOption);
 
         this.statStub = StatGrpc.newStub(managedChannel);
+        this.reconnectExecutor = Assert.requireNonNull(reconnectExecutor, "reconnectExecutor must not be null");
+        {
+            final Runnable statStreamReconnectJob = new Runnable() {
+                @Override
+                public void run() {
+                    statStream = newStatStream();
+                }
+            };
 
-        statStreamReconnectAction = new ExponentialBackoffReconnectJob() {
-            @Override
-            public void run() {
-                statStream = newStatStream();
-            }
-        };
-        this.statStream = newStatStream();
-
-        statBatchStreamReconnectAction = new ExponentialBackoffReconnectJob() {
-            @Override
-            public void run() {
-                statBatchStream = newStatBatchStream();
-            }
-        };
-        this.statBatchStream = newStatBatchStream();
+            this.statStreamReconnector = reconnectExecutor.newReconnector(statStreamReconnectJob);
+            this.statStream = newStatStream();
+        }
     }
 
-    private StreamObserver<PAgentStat> newStatStream() {
-        final ResponseStreamObserver<PAgentStat, Empty> responseObserver = new ResponseStreamObserver<PAgentStat, Empty>(name, reconnector, statStreamReconnectAction);
+    private StreamObserver<PStatMessage> newStatStream() {
+        final StreamId statId = StreamId.newStreamId("StatStream");
+        final ResponseStreamObserver<PStatMessage, Empty> responseObserver = new ResponseStreamObserver<PStatMessage, Empty>(statId, statStreamReconnector);
         return statStub.sendAgentStat(responseObserver);
     }
 
-    private StreamObserver<PAgentStatBatch> newStatBatchStream() {
-        final ResponseStreamObserver<PAgentStatBatch, Empty> responseObserver = new ResponseStreamObserver<PAgentStatBatch, Empty>(name, reconnector, statBatchStreamReconnectAction);
-        return statStub.sendAgentStatBatch(responseObserver);
+    @Override
+    public boolean send(final Object data) {
+        final Runnable command = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    send0(data);
+                } catch (Exception ex) {
+                    logger.debug("send fail:{}", data, ex);
+                }
+            }
+        };
+        try {
+            executor.execute(command);
+        } catch (RejectedExecutionException reject) {
+            logger.debug("reject:{}", command);
+            return false;
+        }
+        return true;
     }
 
-    public boolean send0(Object data) {
+
+    private boolean send0(Object data) {
         final GeneratedMessageV3 message = messageConverter.toMessage(data);
         if (logger.isDebugEnabled()) {
-            logger.debug("Stat send0 data={}", data);
+            logger.debug("Send message={}", debugLog(message));
         }
 
         if (message instanceof PAgentStatBatch) {
             final PAgentStatBatch agentStatBatch = (PAgentStatBatch) message;
-            statBatchStream.onNext(agentStatBatch);
+            final PStatMessage statMessage = PStatMessage.newBuilder().setAgentStatBatch(agentStatBatch).build();
+            statStream.onNext(statMessage);
             return true;
         }
+
         if (message instanceof PAgentStat) {
             final PAgentStat agentStat = (PAgentStat) message;
-            statStream.onNext(agentStat);
+            final PStatMessage statMessage = PStatMessage.newBuilder().setAgentStat(agentStat).build();
+            statStream.onNext(statMessage);
             return true;
         }
         throw new IllegalStateException("unsupported message " + message);
@@ -92,10 +119,27 @@ public class StatGrpcDataSender extends GrpcDataSender {
 
     @Override
     public void stop() {
-        logger.info("statBatchStream.close()");
-        StreamUtils.close(statBatchStream);
-        logger.info("statStream.close()");
+        if (shutdown) {
+            return;
+        }
+        this.shutdown = true;
+
+        logger.info("Stop {}, channel={}", name, managedChannel);
+        final ReconnectExecutor reconnectExecutor = this.reconnectExecutor;
+        if (reconnectExecutor != null) {
+            reconnectExecutor.close();
+        }
+        logger.info("{} close()", statStream);
         StreamUtils.close(statStream);
-        super.stop();
+        release();
+    }
+
+    @Override
+    public String toString() {
+        return "StatGrpcDataSender{" +
+                "name='" + name + '\'' +
+                ", host='" + host + '\'' +
+                ", port=" + port +
+                "} " + super.toString();
     }
 }

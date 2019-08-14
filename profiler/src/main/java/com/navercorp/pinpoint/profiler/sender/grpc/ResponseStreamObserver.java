@@ -17,6 +17,8 @@
 package com.navercorp.pinpoint.profiler.sender.grpc;
 
 import com.navercorp.pinpoint.common.util.Assert;
+import com.navercorp.pinpoint.grpc.StatusError;
+import com.navercorp.pinpoint.grpc.StatusErrors;
 import io.grpc.stub.ClientCallStreamObserver;
 import io.grpc.stub.ClientResponseObserver;
 import org.slf4j.Logger;
@@ -29,14 +31,13 @@ public class ResponseStreamObserver<ReqT, RespT> implements ClientResponseObserv
 
     private final Logger logger = LoggerFactory.getLogger(this.getClass());
 
-    private final String name;
+    private final StreamId name;
     private final Reconnector reconnector;
-    private final ReconnectJob reconnectJob;
 
-    public ResponseStreamObserver(String name, Reconnector reconnector, ReconnectJob reconnectJob) {
+    public ResponseStreamObserver(StreamId name, Reconnector reconnector) {
         this.name = Assert.requireNonNull(name, "name must not be null");
         this.reconnector = Assert.requireNonNull(reconnector, "reconnector must not be null");
-        this.reconnectJob = Assert.requireNonNull(reconnectJob, "reconnectJob");
+
     }
 
     @Override
@@ -45,24 +46,36 @@ public class ResponseStreamObserver<ReqT, RespT> implements ClientResponseObserv
             @Override
             public void run() {
                 logger.info("connect to {} completed.", name);
-                reconnectJob.resetBackoffNanos();
+                reconnector.reset();
             }
         });
     }
 
     @Override
     public void onNext(RespT value) {
-        logger.debug("[{}] onNext:{}", name, value);
+        logger.debug("{} onNext:{}", name, value);
     }
 
     @Override
     public void onError(Throwable t) {
-        logger.info("{} onError:{}", name, t.getMessage(), t);
-        reconnector.reconnect(reconnectJob);
+        final StatusError statusError = StatusErrors.throwable(t);
+        if (statusError.isSimpleError()) {
+            logger.info("Failed to stream, name={}, cause={}", name, statusError.getMessage());
+        } else {
+            logger.warn("Failed to stream, name={}, cause={}", name, statusError.getMessage(), statusError.getThrowable());
+        }
+        reconnector.reconnect();
     }
 
     @Override
     public void onCompleted() {
         logger.debug("{} onCompleted", name);
+    }
+
+    @Override
+    public String toString() {
+        return "ResponseStreamObserver{" +
+                "name=" + name +
+                '}';
     }
 }

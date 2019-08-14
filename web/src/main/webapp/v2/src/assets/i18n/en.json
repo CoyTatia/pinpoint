@@ -13,11 +13,12 @@
         "REMOVE": "Remove",
         "CANCEL": "Cancel",
         "SEARCH_INPUT": "Input query",
-        "NO_CONTENT_TO_DISPLAY": "No content to display"
-    },
-    "MAIN": {
+        "NO_CONTENT_TO_DISPLAY": "No content to display",
         "SELECT_YOUR_APP": "Select your application",
         "INPUT_APP_NAME_PLACE_HOLDER": "Input application name",
+        "EMPTY": "The list is empty."
+    },
+    "MAIN": {
         "FAVORITE_APP_LIST": "Favorite List",
         "APP_LIST": "Application List",
         "EMPTY_RESULT": "We couldn't find anything"
@@ -46,8 +47,7 @@
     },
     "CONFIGURATION": {
         "GENERAL": {
-            "DESC": "* User configuration is stored in browser cache. Server-side storage will be supported in a future release.",
-            "EMPTY": "The list is empty."
+            "DESC": "* User configuration is stored in browser cache. Server-side storage will be supported in a future release."
         },
         "INSPECTOR_MANAGER": {
             "EMPTY": "Select charts to display on screen."
@@ -79,6 +79,9 @@
             "THRESHOLD": "Threshold",
             "TYPE": "Type",
             "NOTES": "Notes"
+        },
+        "ALARM": {
+            "EMPTY": "No registered alarm."
         }
     },
     "TRANSACTION": {
@@ -443,6 +446,12 @@
                         }, {
                             "NAME": "Unsampled New (U.N)",
                             "DESC": "Unprofiled transactions that started from the selected agent"
+                        }, {
+                            "NAME": "Skipped New (S.S.N)",
+                            "DESC": "Unprofiled transactions that started from the selected agent because of processing limit"
+                        }, {
+                            "NAME": "Skipped Continuation (S.S.C)",
+                            "DESC": "Unprofiled transactions that started from another agent because of processing limit"
                         }, {
                             "NAME": "Total",
                             "DESC": "All transactions"

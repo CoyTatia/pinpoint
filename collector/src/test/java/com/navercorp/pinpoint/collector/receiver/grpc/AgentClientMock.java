@@ -17,7 +17,7 @@
 package com.navercorp.pinpoint.collector.receiver.grpc;
 
 import com.navercorp.pinpoint.grpc.AgentHeaderFactory;
-import com.navercorp.pinpoint.grpc.HeaderFactory;
+import com.navercorp.pinpoint.grpc.client.HeaderFactory;
 import com.navercorp.pinpoint.grpc.trace.AgentGrpc;
 import com.navercorp.pinpoint.grpc.trace.MetadataGrpc;
 import com.navercorp.pinpoint.grpc.trace.PAgentInfo;
@@ -41,6 +41,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -55,7 +57,7 @@ public class AgentClientMock {
     private final Logger logger = LoggerFactory.getLogger(this.getClass());
 
     private final ManagedChannel channel;
-    private final AgentGrpc.AgentBlockingStub agentStub;
+    private final AgentGrpc.AgentStub agentStub;
     private final MetadataGrpc.MetadataBlockingStub metadataStub;
 
 
@@ -63,16 +65,14 @@ public class AgentClientMock {
         NettyChannelBuilder builder = NettyChannelBuilder.forAddress(host, port);
 
         if (agentHeader) {
-            AgentHeaderFactory.Header header = new AgentHeaderFactory.Header("mockAgentId", "mockApplicationName", System.currentTimeMillis());
-            HeaderFactory headerFactory = new AgentHeaderFactory(header);
+            HeaderFactory headerFactory = new AgentHeaderFactory("mockAgentId", "mockApplicationName", System.currentTimeMillis());
             final Metadata extraHeaders = headerFactory.newHeader();
             final ClientInterceptor headersInterceptor = MetadataUtils.newAttachHeadersInterceptor(extraHeaders);
             builder.intercept(headersInterceptor);
         }
         builder.usePlaintext();
-
         channel = builder.build();
-        this.agentStub = AgentGrpc.newBlockingStub(channel);
+        this.agentStub = AgentGrpc.newStub(channel);
         this.metadataStub = MetadataGrpc.newBlockingStub(channel);
     }
 
@@ -88,12 +88,13 @@ public class AgentClientMock {
         info(1);
     }
 
-    public void info(final int count) throws InterruptedException {
+    public void info(final int count) {
         for (int i = 0; i < count; i++) {
             PAgentInfo request = PAgentInfo.newBuilder().build();
-            StreamObserver<PResult> responseObserver = getResponseObserver();
-            PResult pResult = agentStub.requestAgentInfo(request);
-            logger.info("Result {}", pResult);
+            QueueingStreamObserver<PResult> responseObserver = getResponseObserver();
+            agentStub.requestAgentInfo(request, responseObserver);
+            PResult value = responseObserver.getValue();
+            logger.info("Result {}", value);
         }
     }
 
@@ -104,7 +105,6 @@ public class AgentClientMock {
     public void apiMetaData(final int count) throws InterruptedException {
         for (int i = 0; i < count; i++) {
             PApiMetaData request = PApiMetaData.newBuilder().build();
-            StreamObserver<PResult> responseObserver = getResponseObserver();
             PResult result = metadataStub.requestApiMetaData(request);
         }
     }
@@ -116,7 +116,6 @@ public class AgentClientMock {
     public void sqlMetaData(final int count) throws InterruptedException {
         for (int i = 0; i < count; i++) {
             PSqlMetaData request = PSqlMetaData.newBuilder().build();
-            StreamObserver<PResult> responseObserver = getResponseObserver();
             PResult result = metadataStub.requestSqlMetaData(request);
         }
     }
@@ -128,31 +127,43 @@ public class AgentClientMock {
     public void stringMetaData(final int count) throws InterruptedException {
         for (int i = 0; i < count; i++) {
             PStringMetaData request = PStringMetaData.newBuilder().build();
-            StreamObserver<PResult> responseObserver = getResponseObserver();
             PResult result = metadataStub.requestStringMetaData(request);
         }
     }
 
 
-    private StreamObserver<PResult> getResponseObserver() {
-        StreamObserver<PResult> responseObserver = new StreamObserver<PResult>() {
-            @Override
-            public void onNext(PResult pResult) {
-                logger.info("Response {}", pResult);
-            }
-
-            @Override
-            public void onError(Throwable throwable) {
-                logger.info("Error ", throwable);
-            }
-
-            @Override
-            public void onCompleted() {
-                logger.info("Completed");
-            }
-        };
-        return responseObserver;
+    private <T> QueueingStreamObserver<T> getResponseObserver() {
+        return new QueueingStreamObserver<>();
     }
+
+    class QueueingStreamObserver<V> implements StreamObserver<V> {
+        private final BlockingQueue<V> queue = new ArrayBlockingQueue<V>(1024);
+
+        @Override
+        public void onNext(V value) {
+            logger.info("Response {}", value);
+            queue.add(value);
+        }
+
+        public V getValue() {
+            try {
+                return queue.poll(3, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return null;
+            }
+        }
+
+        @Override
+        public void onError(Throwable throwable) {
+            logger.info("Error ", throwable);
+        }
+
+        @Override
+        public void onCompleted() {
+            logger.info("Completed");
+        }
+    };
 
     public class CustomLoadBalancerFactory extends LoadBalancer.Factory {
         @Override

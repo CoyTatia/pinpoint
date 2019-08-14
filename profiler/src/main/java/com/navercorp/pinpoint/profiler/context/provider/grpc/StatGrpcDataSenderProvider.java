@@ -19,42 +19,63 @@ package com.navercorp.pinpoint.profiler.context.provider.grpc;
 import com.google.inject.Inject;
 import com.google.inject.Provider;
 import com.google.protobuf.GeneratedMessageV3;
+import com.navercorp.pinpoint.grpc.client.ClientOption;
 import com.navercorp.pinpoint.profiler.context.grpc.GrpcTransportConfig;
+
 import com.navercorp.pinpoint.common.util.Assert;
-import com.navercorp.pinpoint.grpc.HeaderFactory;
+import com.navercorp.pinpoint.grpc.client.HeaderFactory;
+import com.navercorp.pinpoint.grpc.client.ChannelFactoryOption;
+import com.navercorp.pinpoint.grpc.client.UnaryCallDeadlineInterceptor;
 import com.navercorp.pinpoint.profiler.context.module.StatConverter;
 import com.navercorp.pinpoint.profiler.context.thrift.MessageConverter;
 import com.navercorp.pinpoint.profiler.sender.DataSender;
+import com.navercorp.pinpoint.profiler.sender.grpc.ReconnectExecutor;
 import com.navercorp.pinpoint.profiler.sender.grpc.StatGrpcDataSender;
+
 import io.grpc.NameResolverProvider;
 
 /**
  * @author jaehong.kim
  */
-public class StatGrpcDataSenderProvider  implements Provider<DataSender<Object>> {
+public class StatGrpcDataSenderProvider implements Provider<DataSender<Object>> {
     private final GrpcTransportConfig grpcTransportConfig;
     private final MessageConverter<GeneratedMessageV3> messageConverter;
     private final HeaderFactory headerFactory;
+    private final Provider<ReconnectExecutor> reconnectExecutorProvider;
     private final NameResolverProvider nameResolverProvider;
 
     @Inject
     public StatGrpcDataSenderProvider(GrpcTransportConfig grpcTransportConfig,
                                       @StatConverter MessageConverter<GeneratedMessageV3> messageConverter,
                                       HeaderFactory headerFactory,
+                                      Provider<ReconnectExecutor> reconnectExecutor,
                                       NameResolverProvider nameResolverProvider) {
         this.grpcTransportConfig = Assert.requireNonNull(grpcTransportConfig, "profilerConfig must not be null");
         this.messageConverter = Assert.requireNonNull(messageConverter, "messageConverter must not be null");
         this.headerFactory = Assert.requireNonNull(headerFactory, "agentHeaderFactory must not be null");
+        this.reconnectExecutorProvider = Assert.requireNonNull(reconnectExecutor, "reconnectExecutorProvider must not be null");
         this.nameResolverProvider = Assert.requireNonNull(nameResolverProvider, "nameResolverProvider must not be null");
     }
 
     @Override
     public DataSender<Object> get() {
-        String collectorTcpServerIp = grpcTransportConfig.getCollectorStatServerIp();
-        int collectorTcpServerPort = grpcTransportConfig.getCollectorStatServerPort();
+        final String collectorIp = grpcTransportConfig.getStatCollectorIp();
+        final int collectorPort = grpcTransportConfig.getStatCollectorPort();
+        final int senderExecutorQueueSize = grpcTransportConfig.getStatSenderExecutorQueueSize();
+        final int channelExecutorQueueSize = grpcTransportConfig.getStatChannelExecutorQueueSize();
+        final UnaryCallDeadlineInterceptor unaryCallDeadlineInterceptor = new UnaryCallDeadlineInterceptor(grpcTransportConfig.getStatRequestTimeout());
+        final ClientOption clientOption = grpcTransportConfig.getStatClientOption();
 
-        return new StatGrpcDataSender("StatGrpcDataSender", collectorTcpServerIp, collectorTcpServerPort,  messageConverter, headerFactory, nameResolverProvider);
+        ChannelFactoryOption.Builder channelFactoryOptionBuilder = ChannelFactoryOption.newBuilder();
+        channelFactoryOptionBuilder.setName("StatGrpcDataSender");
+        channelFactoryOptionBuilder.setHeaderFactory(headerFactory);
+        channelFactoryOptionBuilder.setNameResolverProvider(nameResolverProvider);
+        channelFactoryOptionBuilder.addClientInterceptor(unaryCallDeadlineInterceptor);
+        channelFactoryOptionBuilder.setExecutorQueueSize(channelExecutorQueueSize);
+        channelFactoryOptionBuilder.setClientOption(clientOption);
+
+        // not singleton
+        ReconnectExecutor reconnectExecutor = reconnectExecutorProvider.get();
+        return new StatGrpcDataSender(collectorIp, collectorPort, senderExecutorQueueSize, messageConverter, reconnectExecutor, channelFactoryOptionBuilder.build());
     }
-
-
 }
