@@ -16,19 +16,22 @@
 
 package com.navercorp.pinpoint.web.mapper;
 
-import com.navercorp.pinpoint.common.hbase.HbaseTableConstatns;
+import com.navercorp.pinpoint.common.buffer.Buffer;
+import com.navercorp.pinpoint.common.buffer.OffsetFixedBuffer;
 import com.navercorp.pinpoint.common.hbase.RowMapper;
-import com.navercorp.pinpoint.web.service.ApplicationFactory;
+import com.navercorp.pinpoint.web.applicationmap.map.AcceptApplication;
+import com.navercorp.pinpoint.web.component.ApplicationFactory;
 import com.navercorp.pinpoint.web.vo.Application;
-
+import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.client.Result;
-import org.apache.hadoop.hbase.util.Bytes;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Component;
 
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * 
@@ -36,26 +39,49 @@ import java.util.Arrays;
  * 
  */
 @Component
-public class HostApplicationMapper implements RowMapper<Application> {
+public class HostApplicationMapper implements RowMapper<List<AcceptApplication>> {
 
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
 
-    @Autowired
-    private ApplicationFactory applicationFactory;
+    private final ApplicationFactory applicationFactory;
+
+    public HostApplicationMapper(ApplicationFactory applicationFactory) {
+        this.applicationFactory = Objects.requireNonNull(applicationFactory, "applicationFactory");
+    }
 
     @Override
-    public Application mapRow(Result result, int rowNum) throws Exception {
+    public List<AcceptApplication> mapRow(Result result, int rowNum) throws Exception {
         if (result.isEmpty()) {
-            return null;
+            return Collections.emptyList();
         }
-        byte[] value = result.value();
+//       readRowKey(result.getRow());
 
-        if (value.length != HbaseTableConstatns.APPLICATION_NAME_MAX_LEN + 2) {
-            logger.warn("Invalid value. {}", Arrays.toString(value));
+        final List<AcceptApplication> acceptApplicationList = new ArrayList<>(result.size());
+        for (Cell cell : result.rawCells()) {
+            AcceptApplication acceptedApplication = createAcceptedApplication(cell);
+            acceptApplicationList.add(acceptedApplication);
         }
+        return acceptApplicationList;
+    }
 
-        String applicationName = Bytes.toString(value, 0, HbaseTableConstatns.APPLICATION_NAME_MAX_LEN - 1).trim();
-        short serviceTypeCode = Bytes.toShort(value, HbaseTableConstatns.APPLICATION_NAME_MAX_LEN);
-        return this.applicationFactory.createApplication(applicationName, serviceTypeCode);
+//    private void readRowKey(byte[] rowKey) {
+//        final Buffer rowKeyBuffer= new FixedBuffer(rowKey);
+//        final String parentApplicationName = rowKeyBuffer.readPadStringAndRightTrim(HBaseTableConstants.APPLICATION_NAME_MAX_LEN);
+//        final short parentApplicationServiceType = rowKeyBuffer.readShort();
+//        final long timeSlot = TimeUtils.recoveryTimeMillis(rowKeyBuffer.readLong());
+//
+//        if (logger.isDebugEnabled()) {
+//            logger.debug("parentApplicationName:{}/{} time:{}", parentApplicationName, parentApplicationServiceType, timeSlot);
+//        }
+//    }
+
+    private AcceptApplication createAcceptedApplication(Cell cell) {
+        Buffer reader = new OffsetFixedBuffer(cell.getQualifierArray(), cell.getQualifierOffset(), cell.getQualifierLength());
+        String host = reader.readPrefixedString();
+        String bindApplicationName = reader.readPrefixedString();
+        short bindServiceTypeCode = reader.readShort();
+
+        final Application bindApplication = applicationFactory.createApplication(bindApplicationName, bindServiceTypeCode);
+        return new AcceptApplication(host, bindApplication);
     }
 }

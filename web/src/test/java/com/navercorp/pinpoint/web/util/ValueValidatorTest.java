@@ -17,10 +17,10 @@
 package com.navercorp.pinpoint.web.util;
 
 import com.navercorp.pinpoint.web.vo.User;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * @author minwoo.jung
@@ -160,20 +160,20 @@ public class ValueValidatorTest {
     @Test
     public void testValidatePhonenumber() {
         //length test
-        assertFalse(ValueValidator.validatePhonenumber(""));
-        assertFalse(ValueValidator.validatePhonenumber("12"));
-        assertFalse(ValueValidator.validatePhonenumber("1234567890123456789012345"));
-        assertTrue(ValueValidator.validatePhonenumber("123456789012345678901234"));
+        assertFalse(ValueValidator.validatePhoneNumber(""));
+        assertFalse(ValueValidator.validatePhoneNumber("12"));
+        assertFalse(ValueValidator.validatePhoneNumber("1234567890123456789012345"));
+        assertTrue(ValueValidator.validatePhoneNumber("123456789012345678901234"));
 
         //character test
-        assertFalse(ValueValidator.validatePhonenumber("AAA"));
-        assertFalse(ValueValidator.validatePhonenumber("aaa"));
-        assertFalse(ValueValidator.validatePhonenumber("!#$"));
-        assertFalse(ValueValidator.validatePhonenumber("123AABB"));
-        assertFalse(ValueValidator.validatePhonenumber("123!@bb"));
+        assertFalse(ValueValidator.validatePhoneNumber("AAA"));
+        assertFalse(ValueValidator.validatePhoneNumber("aaa"));
+        assertFalse(ValueValidator.validatePhoneNumber("!#$"));
+        assertFalse(ValueValidator.validatePhoneNumber("123AABB"));
+        assertFalse(ValueValidator.validatePhoneNumber("123!@bb"));
 
         //success test
-        assertTrue(ValueValidator.validatePhonenumber("123455667"));
+        assertTrue(ValueValidator.validatePhoneNumber("123455667"));
     }
 
     @Test
@@ -228,12 +228,12 @@ public class ValueValidatorTest {
 
     @Test
     public void testValidateUser() {
-        assertTrue(ValueValidator.validateUser(new User("userid", "name", "", "", "")));
-        assertTrue(ValueValidator.validateUser(new User("userid", "name", null, null, null)));
-        assertTrue(ValueValidator.validateUser(new User("userid", "name", "AAA", null, null)));
-        assertTrue(ValueValidator.validateUser(new User("userid", "name", "AAA", "01012341234", "naver@naver.com")));
-        assertFalse(ValueValidator.validateUser(new User("", "", "", "", "")));
-        assertFalse(ValueValidator.validateUser(new User("", "name", "", "", "")));
-        assertFalse(ValueValidator.validateUser(new User("userid", "", "", "", "")));
+        assertTrue(ValueValidator.validateUser(new User("userid", "name", "", 82,"", "")));
+        assertTrue(ValueValidator.validateUser(new User("userid", "name", null, 82,null, null)));
+        assertTrue(ValueValidator.validateUser(new User("userid", "name", "AAA", 82,null, null)));
+        assertTrue(ValueValidator.validateUser(new User("userid", "name", "AAA", 82,"01012341234", "naver@naver.com")));
+        assertFalse(ValueValidator.validateUser(new User("", "", "", 82,"", "")));
+        assertFalse(ValueValidator.validateUser(new User("", "name", "", 82,"", "")));
+        assertFalse(ValueValidator.validateUser(new User("userid", "", "", 82,"", "")));
     }
 }

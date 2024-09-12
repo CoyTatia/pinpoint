@@ -1,43 +1,43 @@
 /*
- *  Copyright 2016 NAVER Corp.
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
+ * Copyright 2019 NAVER Corp.
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package com.navercorp.pinpoint.web.scatter;
 
-import com.navercorp.pinpoint.common.util.TransactionId;
+import com.navercorp.pinpoint.common.profiler.util.TransactionId;
 import com.navercorp.pinpoint.web.vo.scatter.Dot;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * @author Taejin Koo
  */
 public class ScatterDataTest {
 
-    String agentId = "agent";
-    String transactionAgentId = "transactionAgent";
+    private static final String agentId = "agent";
+    private static final String transactionAgentId = "transactionAgent";
 
     @Test
-    public void addDotTest() throws Exception {
+    public void addDotTest() {
         int count = 100;
 
         long from = 1000;
@@ -45,25 +45,25 @@ public class ScatterDataTest {
         int xGroupUnit = 100;
         int yGroupUnit = 100;
 
-        ScatterData scatterData = new ScatterData(from, to, xGroupUnit, yGroupUnit);
+        ScatterDataBuilder builder = new ScatterDataBuilder(from, to, xGroupUnit, yGroupUnit);
         List<Dot> dotList = createDotList(agentId, transactionAgentId, count, from);
 
         for (Dot dot : dotList) {
-            scatterData.addDot(dot);
+            builder.addDot(dot);
         }
 
-        List<Dot> dots = extractDotList(scatterData);
-        Assert.assertEquals(count, dots.size());
+        List<Dot> dots = extractDotList(builder.build());
+        assertThat(dots).hasSize(count);
     }
 
     @Test
-    public void addDotTest2() throws Exception {
+    public void addDotTest2() {
         long from = 1000;
         long to = 10000;
         int xGroupUnit = 100;
         int yGroupUnit = 100;
 
-        ScatterData scatterData = new ScatterData(from, to, xGroupUnit, yGroupUnit);
+        ScatterDataBuilder builder = new ScatterDataBuilder(from, to, xGroupUnit, yGroupUnit);
 
         long currentTime = System.currentTimeMillis();
 
@@ -78,27 +78,27 @@ public class ScatterDataTest {
         Dot dot1 = new Dot(transactionId1, acceptedTime2, executionTime, 0, agentId);
         Dot dot2 = new Dot(transactionId2, acceptedTime2, executionTime, 1, agentId);
 
-        scatterData.addDot(dot1);
-        scatterData.addDot(dot2);
+        builder.addDot(dot1);
+        builder.addDot(dot2);
+        ScatterData scatterData = builder.build();
 
-        Map<Long, DotGroups> scatterDataMap = scatterData.getScatterDataMap();
-        Collection<DotGroups> values = scatterDataMap.values();
-        Assert.assertTrue(values.size() == 1);
+        List<DotGroups> values = scatterData.getScatterData();
+        assertThat(values).hasSize(1);
 
         for (DotGroups dotGroups : values) {
             Map<Dot, DotGroup> dotGroupLeaders = dotGroups.getDotGroupLeaders();
-            Assert.assertTrue(dotGroupLeaders.keySet().size() == 2);
+            assertThat(dotGroupLeaders.keySet()).hasSize(2);
         }
     }
 
     @Test
-    public void addDotTest3() throws Exception {
+    public void addDotTest3() {
         long from = 1000;
         long to = 10000;
         int xGroupUnit = 100;
         int yGroupUnit = 100;
 
-        ScatterData scatterData = new ScatterData(from, to, xGroupUnit, yGroupUnit);
+        ScatterDataBuilder builder = new ScatterDataBuilder(from, to, xGroupUnit, yGroupUnit);
 
         long currentTime = System.currentTimeMillis();
 
@@ -112,32 +112,11 @@ public class ScatterDataTest {
         Dot dot1 = new Dot(transactionId, acceptedTime2, executionTime, 0, agentId);
         Dot dot2 = new Dot(transactionId, acceptedTime2, executionTime, 0, agentId);
 
-        scatterData.addDot(dot1);
-        scatterData.addDot(dot2);
+        builder.addDot(dot1);
+        builder.addDot(dot2);
 
-        List<Dot> dots = extractDotList(scatterData);
-        Assert.assertEquals(2, dots.size());
-    }
-
-    @Test
-    public void mergeTest() throws Exception {
-        int count = 100;
-
-        long from = 1000;
-        long to = 10000;
-        int xGroupUnit = 100;
-        int yGroupUnit = 100;
-
-        ScatterData scatterData = new ScatterData(from, to, xGroupUnit, yGroupUnit);
-        List<Dot> dotList = createDotList(agentId, transactionAgentId, count, from);
-        for (Dot dot : dotList) {
-            ScatterData newScatterData = new ScatterData(from, to, xGroupUnit, yGroupUnit);
-            newScatterData.addDot(dot);
-            scatterData.merge(newScatterData);
-        }
-
-        List<Dot> dots = extractDotList(scatterData);
-        Assert.assertEquals(count, dots.size());
+        List<Dot> dots = extractDotList(builder.build());
+        assertThat(dots).hasSize(2);
     }
 
     private List<Dot> createDotList(String agentId, String transactionAgentId, int createSize, long from) {
@@ -157,8 +136,7 @@ public class ScatterDataTest {
             dotList.add(new Dot(transactionIdList.get(i), Math.max(Math.abs(ThreadLocalRandom.current().nextLong(Long.MAX_VALUE)), from), executionTime, exceptionCode, agentId));
         }
 
-        long seed = System.nanoTime();
-        Collections.shuffle(dotList, new Random(seed));
+        Collections.shuffle(dotList);
 
         return dotList;
     }
@@ -166,7 +144,7 @@ public class ScatterDataTest {
     private List<Dot> extractDotList(ScatterData scatterData) {
         List<Dot> dotList = new ArrayList<>();
 
-        for (DotGroups dotGroups : scatterData.getScatterDataMap().values()) {
+        for (DotGroups dotGroups : scatterData.getScatterData()) {
             dotList.addAll(dotGroups.getSortedDotSet());
         }
 

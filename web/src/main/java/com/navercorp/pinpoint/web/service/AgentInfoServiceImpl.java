@@ -17,45 +17,59 @@
 
 package com.navercorp.pinpoint.web.service;
 
-import com.google.common.collect.Ordering;
-import com.navercorp.pinpoint.common.Version;
-import com.navercorp.pinpoint.common.server.util.AgentLifeCycleState;
-import com.navercorp.pinpoint.rpc.util.ListUtils;
-import com.navercorp.pinpoint.web.dao.AgentDownloadInfoDao;
+import com.navercorp.pinpoint.common.server.util.time.DateTimeUtils;
+import com.navercorp.pinpoint.common.server.util.time.Range;
 import com.navercorp.pinpoint.web.dao.AgentInfoDao;
+import com.navercorp.pinpoint.web.dao.AgentInfoQuery;
 import com.navercorp.pinpoint.web.dao.AgentLifeCycleDao;
 import com.navercorp.pinpoint.web.dao.ApplicationIndexDao;
 import com.navercorp.pinpoint.web.filter.agent.AgentEventFilter;
+import com.navercorp.pinpoint.web.hyperlink.HyperLinkFactory;
+import com.navercorp.pinpoint.web.service.component.ActiveAgentValidator;
+import com.navercorp.pinpoint.web.service.component.LegacyAgentCompatibility;
 import com.navercorp.pinpoint.web.service.stat.AgentWarningStatService;
-import com.navercorp.pinpoint.web.vo.AgentDownloadInfo;
 import com.navercorp.pinpoint.web.vo.AgentEvent;
-import com.navercorp.pinpoint.web.vo.AgentInfo;
-import com.navercorp.pinpoint.web.vo.AgentStatus;
 import com.navercorp.pinpoint.web.vo.Application;
-import com.navercorp.pinpoint.web.vo.ApplicationAgentHostList;
-import com.navercorp.pinpoint.web.vo.ApplicationAgentsList;
-import com.navercorp.pinpoint.web.vo.Range;
+import com.navercorp.pinpoint.web.vo.agent.AgentAndStatus;
+import com.navercorp.pinpoint.web.vo.agent.AgentInfo;
+import com.navercorp.pinpoint.web.vo.agent.AgentInfoFilter;
+import com.navercorp.pinpoint.web.vo.agent.AgentInfoFilters;
+import com.navercorp.pinpoint.web.vo.agent.AgentStatus;
+import com.navercorp.pinpoint.web.vo.agent.AgentStatusAndLink;
+import com.navercorp.pinpoint.web.vo.agent.AgentStatusFilter;
+import com.navercorp.pinpoint.web.vo.agent.AgentStatusFilters;
+import com.navercorp.pinpoint.web.vo.agent.AgentStatusQuery;
+import com.navercorp.pinpoint.web.vo.agent.DetailedAgentAndStatus;
+import com.navercorp.pinpoint.web.vo.agent.DetailedAgentInfo;
 import com.navercorp.pinpoint.web.vo.timeline.inspector.AgentEventTimeline;
 import com.navercorp.pinpoint.web.vo.timeline.inspector.AgentEventTimelineBuilder;
 import com.navercorp.pinpoint.web.vo.timeline.inspector.AgentStatusTimeline;
 import com.navercorp.pinpoint.web.vo.timeline.inspector.AgentStatusTimelineBuilder;
 import com.navercorp.pinpoint.web.vo.timeline.inspector.AgentStatusTimelineSegment;
 import com.navercorp.pinpoint.web.vo.timeline.inspector.InspectorTimeline;
-import org.apache.commons.collections.CollectionUtils;
-import org.apache.commons.collections.PredicateUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.navercorp.pinpoint.web.vo.tree.AgentsMapByApplication;
+import com.navercorp.pinpoint.web.vo.tree.AgentsMapByHost;
+import com.navercorp.pinpoint.web.vo.tree.ApplicationAgentHostList;
+import com.navercorp.pinpoint.web.vo.tree.SortByAgentInfo;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Service;
-import org.springframework.util.Assert;
+import org.springframework.util.CollectionUtils;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.Period;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 /**
  * @author netspider
@@ -64,161 +78,406 @@ import java.util.Set;
 @Service
 public class AgentInfoServiceImpl implements AgentInfoService {
 
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
 
-    @Autowired
-    private AgentEventService agentEventService;
+    private final AgentEventService agentEventService;
 
-    @Autowired
-    private AgentWarningStatService agentWarningStatService;
+    private final AgentWarningStatService agentWarningStatService;
 
-    @Autowired
-    private ApplicationIndexDao applicationIndexDao;
+    private final ApplicationIndexDao applicationIndexDao;
 
-    @Autowired
-    private AgentInfoDao agentInfoDao;
+    private final AgentInfoDao agentInfoDao;
 
-    @Autowired
-    private AgentLifeCycleDao agentLifeCycleDao;
+    private final AgentLifeCycleDao agentLifeCycleDao;
 
-    @Autowired
-    private AgentDownloadInfoDao agentDownloadInfoDao;
+    private final HyperLinkFactory hyperLinkFactory;
+    private final ActiveAgentValidator activeAgentValidator;
+    private final LegacyAgentCompatibility legacyAgentCompatibility;
+
+    public AgentInfoServiceImpl(AgentEventService agentEventService,
+                                AgentWarningStatService agentWarningStatService,
+                                ApplicationIndexDao applicationIndexDao,
+                                AgentInfoDao agentInfoDao,
+                                AgentLifeCycleDao agentLifeCycleDao,
+                                ActiveAgentValidator activeAgentValidator,
+                                HyperLinkFactory hyperLinkFactory,
+                                LegacyAgentCompatibility legacyAgentCompatibility) {
+        this.agentEventService = Objects.requireNonNull(agentEventService, "agentEventService");
+        this.agentWarningStatService = Objects.requireNonNull(agentWarningStatService, "agentWarningStatService");
+        this.applicationIndexDao = Objects.requireNonNull(applicationIndexDao, "applicationIndexDao");
+        this.agentInfoDao = Objects.requireNonNull(agentInfoDao, "agentInfoDao");
+        this.agentLifeCycleDao = Objects.requireNonNull(agentLifeCycleDao, "agentLifeCycleDao");
+        this.activeAgentValidator = Objects.requireNonNull(activeAgentValidator, "activeAgentValidator");
+        this.hyperLinkFactory = Objects.requireNonNull(hyperLinkFactory, "hyperLinkFactory");
+        this.legacyAgentCompatibility = Objects.requireNonNull(legacyAgentCompatibility, "legacyAgentCompatibility");
+    }
 
     @Override
-    public ApplicationAgentsList getAllApplicationAgentsList(ApplicationAgentsList.Filter filter, long timestamp) {
-        ApplicationAgentsList.GroupBy groupBy = ApplicationAgentsList.GroupBy.APPLICATION_NAME;
-        ApplicationAgentsList applicationAgentList = new ApplicationAgentsList(groupBy, filter);
+    public AgentsMapByApplication<AgentAndStatus> getAllAgentsList(AgentStatusFilter filter, Range range) {
+        Objects.requireNonNull(filter, "filter");
+
         List<Application> applications = applicationIndexDao.selectAllApplicationNames();
+        List<AgentAndStatus> agents = new ArrayList<>();
         for (Application application : applications) {
-            applicationAgentList.merge(getApplicationAgentsList(groupBy, filter, application.getName(), timestamp));
+            agents.addAll(getAgentsByApplicationName(application.getName(), range.getTo()));
         }
-        return applicationAgentList;
+
+        return AgentsMapByApplication.newAgentAndStatusMap(
+                filter,
+                agents
+        );
     }
 
     @Override
-    public ApplicationAgentsList getApplicationAgentsList(ApplicationAgentsList.GroupBy groupBy, ApplicationAgentsList.Filter filter, String applicationName, long timestamp) {
-        if (applicationName == null) {
-            throw new NullPointerException("applicationName must not be null");
+    public AgentsMapByApplication<DetailedAgentInfo> getAllAgentsStatisticsList(AgentStatusFilter filter, Range range) {
+        Objects.requireNonNull(filter, "filter");
+
+        List<Application> applications = applicationIndexDao.selectAllApplicationNames();
+        List<DetailedAgentAndStatus> agents = new ArrayList<>();
+        for (Application application : applications) {
+            agents.addAll(getDetailedAgentsByApplicationName(application.getName(), range.getTo()));
         }
-        if (groupBy == null) {
-            throw new NullPointerException("groupBy must not be null");
-        }
-        ApplicationAgentsList applicationAgentsList = new ApplicationAgentsList(groupBy, filter);
-        Set<AgentInfo> agentInfos = getAgentsByApplicationName(applicationName, timestamp);
-        if (agentInfos.isEmpty()) {
+
+        return AgentsMapByApplication.newDetailedAgentInfoMap(
+                filter,
+                agents
+        );
+    }
+
+    @Override
+    public AgentsMapByHost getAgentsListByApplicationName(AgentStatusFilter agentStatusFilter,
+                                                          String applicationName,
+                                                          Range range,
+                                                          SortByAgentInfo.Rules sortBy) {
+        return getAgentsListByApplicationName(agentStatusFilter, AgentInfoFilters.acceptAll(), applicationName, range, sortBy);
+    }
+
+    @Override
+    public AgentsMapByHost getAgentsListByApplicationName(AgentStatusFilter agentStatusFilter,
+                                                          AgentInfoFilter agentInfoPredicate,
+                                                          String applicationName,
+                                                          Range range,
+                                                          SortByAgentInfo.Rules sortBy) {
+        Objects.requireNonNull(agentStatusFilter, "agentStatusFilter");
+        Objects.requireNonNull(agentInfoPredicate, "agentInfoPredicate");
+        Objects.requireNonNull(applicationName, "applicationName");
+
+        Set<AgentAndStatus> agentInfoAndStatuses = getAgentsByApplicationName(applicationName, range.getTo());
+        if (agentInfoAndStatuses.isEmpty()) {
             logger.warn("agent list is empty for application:{}", applicationName);
-            return applicationAgentsList;
         }
-        applicationAgentsList.addAll(agentInfos);
+
+        AgentsMapByHost agentsMapByHost = AgentsMapByHost.newAgentsMapByHost(
+                agentAndStatus -> isActiveAgentPredicate(agentAndStatus, agentInfoPredicate, agentStatusFilter, range),
+                SortByAgentInfo.comparing(AgentStatusAndLink::getAgentInfo, sortBy.getRule()),
+                hyperLinkFactory,
+                agentInfoAndStatuses
+        );
+
+        final int totalAgentCount = agentsMapByHost.size();
+        if (logger.isInfoEnabled()) {
+            logger.info("getAgentsMapByHostname size:{}", totalAgentCount);
+        }
         if (logger.isDebugEnabled()) {
-            logger.debug("getApplicationAgentsList={}", applicationAgentsList);
+            logger.debug("getAgentsMapByHostname size:{} data:{}", totalAgentCount, agentsMapByHost);
         }
-        return applicationAgentsList;
+        return agentsMapByHost;
     }
 
-    @Override
-    public ApplicationAgentHostList getApplicationAgentHostList(int offset, int limit) {
-        if (offset <= 0 || limit <= 0) {
-            throw new IllegalArgumentException("Value must be greater than 0.");
+    private boolean isActiveAgentPredicate(AgentAndStatus agentAndStatus,
+                                           AgentInfoFilter agentInfoPredicate,
+                                           Predicate<AgentStatus> agentStatusFilter,
+                                           Range range) {
+        logger.trace("isActiveAgentPredicate {}", agentAndStatus);
+        AgentInfo agentInfo = agentAndStatus.getAgentInfo();
+        if (agentInfoPredicate.test(agentInfo)) {
+            logger.trace("agentInfoPredicate=true {}", agentAndStatus);
         }
+        if (agentStatusFilter.test(agentAndStatus.getStatus())) {
+            logger.trace("agentStatusFilter=true {}", agentAndStatus);
+            return true;
+        }
+        Application agent = new Application(agentInfo.getAgentId(), agentInfo.getServiceType());
+        String agentVersion = agentInfo.getAgentVersion();
+        if (activeAgentValidator.isActiveAgent(agent, agentVersion, range)) {
+            return true;
+        }
+        logger.trace("isActiveAgentPredicate=false {}", agentAndStatus);
+        return false;
+    }
 
+
+    @Deprecated
+    @Override
+    public ApplicationAgentHostList getApplicationAgentHostList(int offset, int limit, Period durationDays) {
+        if (offset <= 0) {
+            throw new IllegalArgumentException("offset must be greater than 0");
+        }
+        if (limit <= 0) {
+            throw new IllegalArgumentException("limit must be greater than 0");
+        }
+        Objects.requireNonNull(durationDays, "durationDays");
+
+        return getApplicationAgentHostList0(offset, limit, durationDays);
+    }
+
+    @Deprecated
+    private ApplicationAgentHostList getApplicationAgentHostList0(int offset, int limit, Period durationDays) {
         List<String> applicationNameList = getApplicationNameList(applicationIndexDao.selectAllApplicationNames());
         if (offset > applicationNameList.size()) {
-            return new ApplicationAgentHostList(offset, offset, applicationNameList.size());
+            ApplicationAgentHostList.Builder builder = newBuilder(offset, offset, applicationNameList.size());
+            return builder.build();
         }
 
-        long timeStamp = System.currentTimeMillis();
+        final long timeStamp = System.currentTimeMillis();
 
-        int startIndex = offset - 1;
-        int endIndex = Math.min(startIndex + limit, applicationNameList.size());
-        ApplicationAgentHostList applicationAgentHostList = new ApplicationAgentHostList(offset, endIndex, applicationNameList.size());
-        for (int i = startIndex ; i < endIndex; i++) {
+        final int startIndex = offset - 1;
+        final int endIndex = Math.min(startIndex + limit, applicationNameList.size());
+
+        ApplicationAgentHostList.Builder builder = newBuilder(offset, endIndex, applicationNameList.size());
+        for (int i = startIndex; i < endIndex; i++) {
             String applicationName = applicationNameList.get(i);
 
-            List<String> agentIds = this.applicationIndexDao.selectAgentIds(applicationName);
-            List<AgentInfo> agentInfoList = this.agentInfoDao.getAgentInfos(agentIds, timeStamp);
-            applicationAgentHostList.put(applicationName, agentInfoList);
+            List<String> agentIdList = getAgentIdList(applicationName, durationDays);
+            List<AgentInfo> agentInfoList = this.agentInfoDao.getSimpleAgentInfos(agentIdList, timeStamp);
+            builder.addAgentInfo(applicationName, agentInfoList);
         }
-        return applicationAgentHostList;
+        return builder.build();
     }
 
-    private List<String> getApplicationNameList(List<Application> applications) {
-        List<String> applicationNameList = new ArrayList<>(applications.size());
-        for (Application application : applications) {
-            if (!applicationNameList.contains(application.getName())) {
-                applicationNameList.add(application.getName());
+    @Override
+    public ApplicationAgentHostList getApplicationAgentHostList(int offset, int limit, int durationHours, List<Application> applicationList, AgentInfoFilter agentInfoFilter) {
+        List<String> applicationNameList = getApplicationNameList(applicationList);
+        return getApplicationAgentHostList2(offset, limit, durationHours, applicationNameList, agentInfoFilter);
+    }
+
+    private ApplicationAgentHostList getApplicationAgentHostList2(int offset, int limit, int durationHours, List<String> applicationNameList, AgentInfoFilter agentInfoFilter) {
+        if (offset > applicationNameList.size()) {
+            ApplicationAgentHostList.Builder builder = newBuilder(offset, offset, applicationNameList.size());
+            return builder.build();
+        }
+        final long currentTime = System.currentTimeMillis();
+        final int startIndex = offset - 1;
+        final int endIndex = Math.min(startIndex + limit, applicationNameList.size());
+
+        ApplicationAgentHostList.Builder builder = newBuilder(offset, endIndex, applicationNameList.size());
+        for (int i = startIndex; i < endIndex; i++) {
+            String applicationName = applicationNameList.get(i);
+
+            List<AgentInfo> agentInfoList = getAgentInfoList(applicationName, currentTime, durationHours, agentInfoFilter);
+            builder.addAgentInfo(applicationName, agentInfoList);
+        }
+        return builder.build();
+    }
+
+    private List<AgentInfo> getAgentInfoList(String applicationName, long timestamp, int durationHours, AgentInfoFilter agentInfoFilter) {
+        List<AgentInfo> filteredAgentInfoList = getAgentsByApplicationNameWithoutStatus(applicationName, timestamp).stream()
+                .filter(agentInfoFilter)
+                .collect(Collectors.toList());
+        if (CollectionUtils.isEmpty(filteredAgentInfoList)) {
+            return Collections.emptyList();
+        }
+        if (durationHours <= 0) {
+            return filteredAgentInfoList;
+        }
+
+        Range range = Range.between(timestamp - TimeUnit.HOURS.toMillis(durationHours), timestamp);
+        List<AgentAndStatus> agentAndStatusList = getAgentAndStatuses(filteredAgentInfoList, timestamp);
+        List<AgentInfo> filteredActiveAgentInfoList = agentAndStatusList.stream()
+                .filter(agentAndStatus -> isActiveAgentSimplePredicate(agentAndStatus, AgentStatusFilters.recentRunning(range.getFrom()), range))
+                .map(AgentAndStatus::getAgentInfo)
+                .collect(Collectors.toList());
+        return filteredActiveAgentInfoList;
+    }
+
+    private boolean isActiveAgentSimplePredicate(AgentAndStatus agentAndStatus, AgentStatusFilter agentStatusFilter, Range range) {
+        if (agentStatusFilter.test(agentAndStatus.getStatus())) {
+            return true;
+        }
+
+        AgentInfo agentInfo = agentAndStatus.getAgentInfo();
+        if (legacyAgentCompatibility.isLegacyAgent(agentInfo.getServiceTypeCode(), agentInfo.getAgentVersion())) {
+            if (legacyAgentCompatibility.isActiveAgent(agentInfo.getAgentId(), range)) {
+                return true;
             }
         }
 
-        applicationNameList.sort(Ordering.usingToString());
-        return applicationNameList;
+        return false;
+    }
+
+    private ApplicationAgentHostList.Builder newBuilder(int offset, int endIndex, int totalApplications) {
+        return ApplicationAgentHostList.newBuilder(offset, endIndex, totalApplications);
+    }
+
+    @Deprecated
+    private List<String> getAgentIdList(String applicationName, Period durationDays) {
+        List<String> agentIds = this.applicationIndexDao.selectAgentIds(applicationName);
+        if (CollectionUtils.isEmpty(agentIds)) {
+            return Collections.emptyList();
+        }
+        if (durationDays.isNegative()) {
+            return agentIds;
+        }
+
+        Instant now = DateTimeUtils.epochMilli();
+        Instant before = now.minus(Duration.ofHours(1));
+        Range fastRange = Range.between(before, now);
+
+        Instant queryFrom = now.minus(durationDays);
+        Instant queryTo = before.plusMillis(1);
+        Range queryRange = Range.between(queryFrom, queryTo);
+
+        List<String> activeAgentIdList = new ArrayList<>();
+        for (String agentId : agentIds) {
+            // FIXME This needs to be done with a more accurate information.
+            // If at any time a non-java agent is introduced, or an agent that does not collect jvm data,
+            // this will fail
+            boolean dataExists = activeAgentValidator.isActiveAgent(agentId, fastRange);
+            if (dataExists) {
+                activeAgentIdList.add(agentId);
+                continue;
+            }
+
+            dataExists = activeAgentValidator.isActiveAgent(agentId, queryRange);
+            if (dataExists) {
+                activeAgentIdList.add(agentId);
+            }
+        }
+        return activeAgentIdList;
+    }
+
+    private List<String> getApplicationNameList(List<Application> applications) {
+        return applications.stream()
+                .map(Application::getName)
+                .distinct()
+                .sorted(Comparator.naturalOrder())
+                .collect(Collectors.toList());
     }
 
     @Override
-    public Set<AgentInfo> getAgentsByApplicationName(String applicationName, long timestamp) {
-        Set<AgentInfo> agentInfos = this.getAgentsByApplicationNameWithoutStatus(applicationName, timestamp);
-        this.agentLifeCycleDao.populateAgentStatuses(agentInfos, timestamp);
-        return agentInfos;
+    public Set<AgentAndStatus> getAgentsByApplicationName(String applicationName, long timestamp) {
+        List<AgentInfo> agentInfos = this.getAgentsByApplicationNameWithoutStatus0(applicationName, timestamp);
+        List<AgentAndStatus> result = getAgentAndStatuses(agentInfos, timestamp);
+        return new HashSet<>(result);
     }
+
+    private List<AgentAndStatus> getAgentAndStatuses(List<AgentInfo> agentInfoList, long timestamp) {
+        List<AgentAndStatus> result = new ArrayList<>(agentInfoList.size());
+
+        AgentStatusQuery query = AgentStatusQuery.buildQuery(agentInfoList, Instant.ofEpochMilli(timestamp));
+        List<Optional<AgentStatus>> agentStatus = this.agentLifeCycleDao.getAgentStatus(query);
+        for (int i = 0; i < agentStatus.size(); i++) {
+            Optional<AgentStatus> status = agentStatus.get(i);
+            AgentInfo agentInfo = agentInfoList.get(i);
+            result.add(new AgentAndStatus(agentInfo, status.orElse(null)));
+        }
+        return result;
+    }
+
 
     @Override
     public Set<AgentInfo> getAgentsByApplicationNameWithoutStatus(String applicationName, long timestamp) {
-        if (applicationName == null) {
-            throw new NullPointerException("applicationName must not be null");
-        }
+        List<AgentInfo> agentInfos = getAgentsByApplicationNameWithoutStatus0(applicationName, timestamp);
+        return new HashSet<>(agentInfos);
+    }
+
+    public List<AgentInfo> getAgentsByApplicationNameWithoutStatus0(String applicationName, long timestamp) {
+        Objects.requireNonNull(applicationName, "applicationName");
         if (timestamp < 0) {
             throw new IllegalArgumentException("timestamp must not be less than 0");
         }
 
         List<String> agentIds = this.applicationIndexDao.selectAgentIds(applicationName);
-        List<AgentInfo> agentInfos = this.agentInfoDao.getAgentInfos(agentIds, timestamp);
-        CollectionUtils.filter(agentInfos, PredicateUtils.notNullPredicate());
-        if (CollectionUtils.isEmpty(agentInfos)) {
-            return Collections.emptySet();
-        }
-        return new HashSet<>(agentInfos);
+        List<AgentInfo> agentInfos = this.agentInfoDao.getSimpleAgentInfos(agentIds, timestamp);
+
+        return agentInfos.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+
     }
 
-    @Override
-    public Set<AgentInfo> getRecentAgentsByApplicationName(String applicationName, long timestamp, long timeDiff) {
-        if (timeDiff > timestamp) {
-            throw new IllegalArgumentException("timeDiff must not be greater than timestamp");
+    public Set<DetailedAgentAndStatus> getDetailedAgentsByApplicationName(String applicationName, long timestamp) {
+        List<DetailedAgentInfo> agentInfos = this.getDetailedAgentsByApplicationNameWithoutStatus0(applicationName, timestamp);
+
+        List<DetailedAgentAndStatus> result = new ArrayList<>(agentInfos.size());
+
+        AgentStatusQuery query = AgentStatusQuery.buildGenericQuery(agentInfos, DetailedAgentInfo::getAgentInfo, Instant.ofEpochMilli(timestamp));
+        List<Optional<AgentStatus>> agentStatus = this.agentLifeCycleDao.getAgentStatus(query);
+
+        for (int i = 0; i < agentStatus.size(); i++) {
+            Optional<AgentStatus> status = agentStatus.get(i);
+            DetailedAgentInfo agentInfo = agentInfos.get(i);
+            result.add(new DetailedAgentAndStatus(agentInfo, status.orElse(null)));
         }
 
-        Set<AgentInfo> unfilteredAgentInfos = this.getAgentsByApplicationName(applicationName, timestamp);
-
-        final long eventTimestampFloor = timestamp - timeDiff;
-
-        Set<AgentInfo> filteredAgentInfos = new HashSet<>();
-        for (AgentInfo agentInfo : unfilteredAgentInfos) {
-            AgentStatus agentStatus = agentInfo.getStatus();
-            if (AgentLifeCycleState.UNKNOWN == agentStatus.getState() || eventTimestampFloor <= agentStatus.getEventTimestamp()) {
-                filteredAgentInfos.add(agentInfo);
-            }
-        }
-        return filteredAgentInfos;
+        return new HashSet<>(result);
     }
 
-    @Override
-    public AgentInfo getAgentInfo(String agentId, long timestamp) {
-        if (agentId == null) {
-            throw new NullPointerException("agentId must not be null");
-        }
+    public List<DetailedAgentInfo> getDetailedAgentsByApplicationNameWithoutStatus0(String applicationName, long timestamp) {
+        Objects.requireNonNull(applicationName, "applicationName");
         if (timestamp < 0) {
             throw new IllegalArgumentException("timestamp must not be less than 0");
         }
-        AgentInfo agentInfo = this.agentInfoDao.getAgentInfo(agentId, timestamp);
-        if (agentInfo != null) {
-            this.agentLifeCycleDao.populateAgentStatus(agentInfo, timestamp);
+
+        List<String> agentIds = this.applicationIndexDao.selectAgentIds(applicationName);
+        List<DetailedAgentInfo> agentInfos = this.agentInfoDao.getDetailedAgentInfos(agentIds, timestamp, AgentInfoQuery.jvm());
+
+        return agentInfos.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public AgentAndStatus getAgentInfo(String agentId, long timestamp) {
+        Objects.requireNonNull(agentId, "agentId");
+
+        AgentInfo agentInfo = getAgentInfoWithoutStatus(agentId, timestamp);
+        if (agentInfo == null) {
+            return null;
         }
-        return agentInfo;
+
+        Optional<AgentStatus> agentStatus = this.agentLifeCycleDao.getAgentStatus(agentInfo.getAgentId(), agentInfo.getStartTimestamp(), timestamp);
+        return new AgentAndStatus(agentInfo, agentStatus.orElse(null));
+    }
+
+    @Override
+    public DetailedAgentAndStatus getDetailedAgentInfo(String agentId, long timestamp) {
+        Objects.requireNonNull(agentId, "agentId");
+        if (timestamp < 0) {
+            throw new IllegalArgumentException("timestamp must not be less than 0");
+        }
+
+        DetailedAgentInfo detailedAgentInfo = this.agentInfoDao.getDetailedAgentInfo(agentId, timestamp);
+        if (detailedAgentInfo == null) {
+            return null;
+        }
+        AgentInfo agentInfo = detailedAgentInfo.getAgentInfo();
+
+        Optional<AgentStatus> agentStatus = this.agentLifeCycleDao.getAgentStatus(agentInfo.getAgentId(), agentInfo.getStartTimestamp(), timestamp);
+        return new DetailedAgentAndStatus(detailedAgentInfo, agentStatus.orElse(null));
+
+    }
+
+    @Override
+    public AgentInfo getAgentInfoWithoutStatus(String agentId, long timestamp) {
+        Objects.requireNonNull(agentId, "agentId");
+        if (timestamp < 0) {
+            throw new IllegalArgumentException("timestamp must not be less than 0");
+        }
+        return this.agentInfoDao.getAgentInfo(agentId, timestamp);
+    }
+
+    @Override
+    public AgentInfo getAgentInfoWithoutStatus(String agentId, long agentStartTime, int deltaTimeInMilliSeconds) {
+        Objects.requireNonNull(agentId, "agentId");
+
+        return this.agentInfoDao.getAgentInfo(agentId, agentStartTime, deltaTimeInMilliSeconds);
     }
 
     @Override
     public AgentStatus getAgentStatus(String agentId, long timestamp) {
-        if (agentId == null) {
-            throw new NullPointerException("agentId must not be null");
-        }
+        Objects.requireNonNull(agentId, "agentId");
+
         if (timestamp < 0) {
             throw new IllegalArgumentException("timestamp must not be less than 0");
         }
@@ -226,14 +485,19 @@ public class AgentInfoServiceImpl implements AgentInfoService {
     }
 
     @Override
-    public void populateAgentStatuses(Collection<AgentInfo> agentInfos, long timestamp) {
-        this.agentLifeCycleDao.populateAgentStatuses(agentInfos, timestamp);
+    public List<Optional<AgentStatus>> getAgentStatus(AgentStatusQuery query) {
+        Objects.requireNonNull(query, "query");
+        if (query.getQueryTimestamp() < 0) {
+            throw new IllegalArgumentException("timestamp must not be less than 0");
+        }
+        return this.agentLifeCycleDao.getAgentStatus(query);
     }
+
 
     @Override
     public InspectorTimeline getAgentStatusTimeline(String agentId, Range range, int... excludeAgentEventTypeCodes) {
-        Assert.notNull(agentId, "agentId must not be null");
-        Assert.notNull(range, "range must not be null");
+        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(range, "range");
 
         AgentStatus initialStatus = getAgentStatus(agentId, range.getFrom());
         List<AgentEvent> agentEvents = agentEventService.getAgentEvents(agentId, range);
@@ -253,50 +517,10 @@ public class AgentInfoServiceImpl implements AgentInfoService {
 
     @Override
     public boolean isExistAgentId(String agentId) {
-        AgentInfo agentInfo = getAgentInfo(agentId, System.currentTimeMillis());
+        Objects.requireNonNull(agentId, "agentId");
+
+        AgentInfo agentInfo = getAgentInfoWithoutStatus(agentId, System.currentTimeMillis());
         return agentInfo != null;
-    }
-
-    private volatile AgentDownloadInfo cachedAgentDownloadInfo;
-
-    @Override
-    public AgentDownloadInfo getLatestStableAgentDownloadInfo() {
-        if (cachedAgentDownloadInfo != null) {
-            return cachedAgentDownloadInfo;
-        }
-
-        List<AgentDownloadInfo> downloadInfoList = agentDownloadInfoDao.getDownloadInfoList();
-        if (CollectionUtils.isEmpty(downloadInfoList)) {
-            return null;
-        }
-
-        downloadInfoList.sort(new Comparator<AgentDownloadInfo>() {
-            @Override
-            public int compare(AgentDownloadInfo o1, AgentDownloadInfo o2) {
-                return o2.getVersion().compareTo(o1.getVersion());
-            }
-        });
-
-        // 1st. find same
-        for (AgentDownloadInfo downloadInfo : downloadInfoList) {
-            if (Version.VERSION.equals(downloadInfo.getVersion())) {
-                cachedAgentDownloadInfo = downloadInfo;
-                return downloadInfo;
-            }
-        }
-
-        // 2nd. find lower
-        for (AgentDownloadInfo downloadInfo : downloadInfoList) {
-            if (Version.VERSION.compareTo(downloadInfo.getVersion()) > 0) {
-                cachedAgentDownloadInfo = downloadInfo;
-                return downloadInfo;
-            }
-        }
-
-        // 3rd find greater
-        AgentDownloadInfo downloadInfo = ListUtils.getLast(downloadInfoList);
-        cachedAgentDownloadInfo = downloadInfo;
-        return downloadInfo;
     }
 
 }

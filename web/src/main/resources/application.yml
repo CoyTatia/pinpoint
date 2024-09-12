@@ -1,0 +1,46 @@
+spring:
+  profiles:
+    active: release
+  jackson:
+    mapper:
+      default-view-inclusion: true
+
+server:
+  port: 8080
+  error:
+    path: /api/error
+    include-exception: true
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: always
+    whitelabel:
+      enabled: true
+  max-http-request-header-size: 32KB
+
+pinpoint:
+  modules:
+    web:
+      # github or url
+      install:
+        type: github
+      # basicLogin
+      login:
+      webhook: true
+    realtime:
+      enabled: false
+  web:
+    agent-status:
+      legacy-agent-support: true
+
+hbase:
+  client:
+    scan-metric-reporter:
+      enable: false
+
+pinpoint.web.cache-resources: true
+
+---
+spring.config.activate.on-profile: local
+pinpoint.web.cache-resources: false
+
+

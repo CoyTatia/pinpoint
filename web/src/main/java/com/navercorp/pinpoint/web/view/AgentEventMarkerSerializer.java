@@ -17,7 +17,6 @@
 package com.navercorp.pinpoint.web.view;
 
 import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.navercorp.pinpoint.common.server.util.AgentEventType;
@@ -32,11 +31,11 @@ import java.util.Map;
 public class AgentEventMarkerSerializer extends JsonSerializer<AgentEventMarker> {
 
     @Override
-    public void serialize(AgentEventMarker agentEventMarker, JsonGenerator jsonGenerator, SerializerProvider serializerProvider) throws IOException, JsonProcessingException {
+    public void serialize(AgentEventMarker agentEventMarker, JsonGenerator jsonGenerator, SerializerProvider serializerProvider) throws IOException {
         jsonGenerator.writeStartObject();
         jsonGenerator.writeNumberField("totalCount", agentEventMarker.getTotalCount());
         jsonGenerator.writeFieldName("typeCounts");
-        jsonGenerator.writeStartArray(agentEventMarker.getTypeCounts().size());
+        jsonGenerator.writeStartArray();
         for (Map.Entry<AgentEventType, Integer> e : agentEventMarker.getTypeCounts().entrySet()) {
             writeAgentEventTypeCount(jsonGenerator, e);
         }

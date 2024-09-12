@@ -18,13 +18,14 @@ package com.navercorp.pinpoint.web.vo.timeline.inspector;
 
 import com.navercorp.pinpoint.web.filter.agent.AgentEventFilter;
 import com.navercorp.pinpoint.web.vo.AgentEvent;
-import com.navercorp.pinpoint.web.vo.Range;
+import com.navercorp.pinpoint.common.server.util.time.Range;
 import org.springframework.util.Assert;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
 
 /**
@@ -40,21 +41,21 @@ public class AgentEventTimelineBuilder {
     private final int numTimeslots;
 
     private List<AgentEvent> agentEvents = Collections.emptyList();
-    private List<AgentEventFilter> filters = new ArrayList<>();
+    private final List<AgentEventFilter> filters = new ArrayList<>();
 
     public AgentEventTimelineBuilder(Range range) {
         this(range, DEFAULT_NUM_TIMESLOTS);
     }
 
     public AgentEventTimelineBuilder(Range range, int numTimeslots) {
-        Assert.notNull(range, "range must not be null");
-        Assert.isTrue(range.getRange() > 0, "timeline must have range greater than 0");
+        Objects.requireNonNull(range, "range");
+        Assert.isTrue(range.durationMillis() > 0, "timeline must have range greater than 0");
         Assert.isTrue(numTimeslots > 0, "numTimeslots must be greater than 0");
         this.timelineStartTimestamp = range.getFrom();
         this.timelineEndTimestamp = range.getTo();
         int adjustedNumTimeslots = numTimeslots;
-        if (range.getRange() < adjustedNumTimeslots) {
-            adjustedNumTimeslots = (int) range.getRange();
+        if (range.durationMillis() < adjustedNumTimeslots) {
+            adjustedNumTimeslots = (int) range.durationMillis();
         }
         this.timeslotSize = (timelineEndTimestamp - timelineStartTimestamp) / adjustedNumTimeslots;
         this.numTimeslots = adjustedNumTimeslots;
@@ -113,11 +114,7 @@ public class AgentEventTimelineBuilder {
         Map<Long, List<AgentEvent>> timeslotIndexMap = new TreeMap<>();
         for (AgentEvent agentEvent : agentEvents) {
             long timeslotIndex = getTimeslotIndex(agentEvent.getEventTimestamp());
-            List<AgentEvent> timeslotAgentEvents = timeslotIndexMap.get(timeslotIndex);
-            if (timeslotAgentEvents == null) {
-                timeslotAgentEvents = new ArrayList<>();
-                timeslotIndexMap.put(timeslotIndex, timeslotAgentEvents);
-            }
+            List<AgentEvent> timeslotAgentEvents = timeslotIndexMap.computeIfAbsent(timeslotIndex, k -> new ArrayList<>());
             timeslotAgentEvents.add(agentEvent);
         }
         return timeslotIndexMap;

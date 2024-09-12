@@ -23,25 +23,30 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.Objects;
+import java.util.function.ToIntFunction;
 
 /**
  * @author Taejin Koo
  */
 public class DotGroups {
 
-    private static final DotComparator DOT_COMPARATOR = new DotComparator();
+    private static final Comparator<Dot> DOT_COMPARATOR = Comparator.comparingLong(Dot::getAcceptedTime);
 
     private final long xCoordinates;
-    private final Map<Key, DotGroup> dotGroupMap = new HashMap<>();
+    private final Map<Key, DotGroup> dotGroupMap;
 
     public DotGroups(long xCoordinates) {
         this.xCoordinates = xCoordinates;
+        this.dotGroupMap = new HashMap<>();
     }
 
+
     void addDot(Coordinates coordinates, Dot dot) {
-        Key key = new Key(coordinates, dot.getSimpleExceptionCode());
+        Objects.requireNonNull(coordinates, "coordinates");
+        Objects.requireNonNull(dot, "dot");
+
+        final Key key = new Key(coordinates, dot.getStatus().getCode());
 
         DotGroup dotGroup = dotGroupMap.get(key);
         if (dotGroup == null) {
@@ -52,23 +57,6 @@ public class DotGroups {
         dotGroup.addDot(dot);
     }
 
-    void merge(DotGroups dotGroups) {
-        if (dotGroups == null) {
-            return;
-        }
-
-        Map<Key, DotGroup> dotGroupMap = dotGroups.getDotGroupMap();
-        for (Map.Entry<Key, DotGroup> entry : dotGroupMap.entrySet()) {
-            Key key = entry.getKey();
-
-            DotGroup dotGroup = this.dotGroupMap.get(key);
-            if (dotGroup == null) {
-                this.dotGroupMap.put(key, entry.getValue());
-            } else {
-                dotGroup.merge(entry.getValue());
-            }
-        }
-    }
 
     public long getXCoordinates() {
         return xCoordinates;
@@ -78,23 +66,27 @@ public class DotGroups {
         return dotGroupMap;
     }
 
-    public Set<Dot> getSortedDotSet() {
+    public List<Dot> getSortedDotSet() {
         Collection<DotGroup> dotGroupList = dotGroupMap.values();
 
-        int size = 0;
-        for (DotGroup dotGroup : dotGroupList) {
-            size += dotGroup.getDotSize();
-        }
+        int size = getSize(dotGroupList, DotGroup::getDotSize);
 
         List<Dot> dotList = new ArrayList<>(size);
         for (DotGroup dotGroup : dotGroupList) {
             dotList.addAll(dotGroup.getDotList());
         }
 
-        Set<Dot> sortedSet = new TreeSet<>(DOT_COMPARATOR);
-        sortedSet.addAll(dotList);
+        dotList.sort(DOT_COMPARATOR);
+        return dotList;
 
-        return sortedSet;
+    }
+
+    private <T> int getSize(Collection<T> collection, ToIntFunction<? super T> keyExtractor) {
+        int size = 0;
+        for (T t : collection) {
+            size += keyExtractor.applyAsInt(t);
+        }
+        return size;
     }
 
     public Map<Dot, DotGroup> getDotGroupLeaders() {
@@ -102,7 +94,7 @@ public class DotGroups {
 
         Collection<DotGroup> dotGroupList = dotGroupMap.values();
         for (DotGroup dotGroup : dotGroupList) {
-            if (dotGroup.getDotLeader() != null) {
+            if (!dotGroup.isEmpty()) {
                 dotLeaderMap.put(dotGroup.getDotLeader(), dotGroup);
             }
         }
@@ -133,75 +125,7 @@ public class DotGroups {
         return "DotGroups{" + "xCoordinates=" + xCoordinates + ", dotGroupMap=" + dotGroupMap + '}';
     }
 
-    private static class DotComparator implements Comparator<Dot> {
-
-        @Override
-        public int compare(Dot o1, Dot o2) {
-            int compare = Long.compare(o2.getAcceptedTime(), o1.getAcceptedTime());
-            if (compare == 0) {
-                return -1;
-            }
-
-            return compare;
-        }
-    }
-
-    static class Key {
-
-        private final Coordinates coordinates;
-        private final int code;
-
-        private int hashCode = 0;
-
-        public Key(Coordinates coordinates, int code) {
-            this.coordinates = coordinates;
-            this.code = code;
-
-            hashCode();
-        }
-
-
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj) {
-                return true;
-            }
-            if (obj == null || getClass() != obj.getClass()) {
-                return false;
-            }
-
-            Key that = (Key) obj;
-
-            if (!coordinates.equals(that.coordinates)) {
-                return false;
-            }
-
-            if (code != that.code) {
-                return false;
-            }
-
-            return true;
-        }
-
-        @Override
-        public int hashCode() {
-            if (hashCode == 0) {
-                int result = coordinates != null ? coordinates.hashCode() : 0;
-                result = 31 * result + code;
-
-                this.hashCode = result;
-            }
-            return hashCode;
-        }
-
-        @Override
-        public String toString() {
-            return "Key{" +
-                    "coordinates=" + coordinates +
-                    ", code=" + code +
-                    '}';
-        }
-
+    record Key(Coordinates coordinates, int code) {
     }
 
 }

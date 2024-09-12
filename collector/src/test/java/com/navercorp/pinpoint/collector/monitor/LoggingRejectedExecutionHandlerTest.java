@@ -1,0 +1,56 @@
+/*
+ * Copyright 2019 NAVER Corp.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.navercorp.pinpoint.collector.monitor;
+
+import com.google.common.util.concurrent.MoreExecutors;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.time.Duration;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+
+public class LoggingRejectedExecutionHandlerTest {
+
+    ThreadPoolExecutor executor;
+
+    @BeforeEach
+    void setUp() {
+        this.executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(1);
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (executor != null) {
+            MoreExecutors.shutdownAndAwaitTermination(executor, Duration.ofSeconds(3));
+        }
+    }
+
+    @Test
+    public void rejectedExecution() {
+        LoggingRejectedExecutionHandler handler = new LoggingRejectedExecutionHandler("testExecutor", 10);
+
+        Runnable runnable = () -> {
+            //
+        };
+        for (int i = 0; i < 100; i++) {
+            handler.rejectedExecution(runnable, executor);
+        }
+    }
+
+}

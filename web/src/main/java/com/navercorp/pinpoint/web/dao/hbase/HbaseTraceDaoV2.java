@@ -1,97 +1,126 @@
+/*
+ * Copyright 2019 NAVER Corp.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.navercorp.pinpoint.web.dao.hbase;
 
 import com.navercorp.pinpoint.common.hbase.HbaseColumnFamily;
-import com.navercorp.pinpoint.common.hbase.HbaseOperations2;
+import com.navercorp.pinpoint.common.hbase.HbaseOperations;
+import com.navercorp.pinpoint.common.hbase.RowMapper;
+import com.navercorp.pinpoint.common.hbase.TableNameProvider;
+import com.navercorp.pinpoint.common.hbase.bo.ColumnGetCount;
 import com.navercorp.pinpoint.common.hbase.rowmapper.RequestAwareDynamicRowMapper;
 import com.navercorp.pinpoint.common.hbase.rowmapper.RequestAwareRowMapper;
 import com.navercorp.pinpoint.common.hbase.rowmapper.RequestAwareRowMapperAdaptor;
-import com.navercorp.pinpoint.common.hbase.RowMapper;
+import com.navercorp.pinpoint.common.hbase.rowmapper.ResultSizeMapper;
+import com.navercorp.pinpoint.common.hbase.rowmapper.RowMapperResultAdaptor;
+import com.navercorp.pinpoint.common.profiler.util.TransactionId;
 import com.navercorp.pinpoint.common.server.bo.SpanBo;
-import com.navercorp.pinpoint.common.server.bo.serializer.RowKeyDecoder;
 import com.navercorp.pinpoint.common.server.bo.serializer.RowKeyEncoder;
-import com.navercorp.pinpoint.common.server.bo.serializer.trace.v2.SpanDecoder;
-import com.navercorp.pinpoint.common.server.bo.serializer.trace.v2.SpanDecoderV0;
 import com.navercorp.pinpoint.common.server.bo.serializer.trace.v2.SpanEncoder;
-import com.navercorp.pinpoint.common.util.Assert;
-import com.navercorp.pinpoint.common.util.TransactionId;
 import com.navercorp.pinpoint.web.dao.TraceDao;
-import com.navercorp.pinpoint.web.mapper.CellTraceMapper;
-import com.navercorp.pinpoint.web.mapper.SpanMapperV2;
-import com.navercorp.pinpoint.web.mapper.TargetSpanDecoder;
+import com.navercorp.pinpoint.web.mapper.SpanMapperFactory;
+import com.navercorp.pinpoint.web.service.FetchResult;
 import com.navercorp.pinpoint.web.vo.GetTraceInfo;
-import com.navercorp.pinpoint.web.vo.SpanHint;
-
-import com.google.common.collect.Lists;
-import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.collections4.ListUtils;
+import org.apache.hadoop.hbase.CompareOperator;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.filter.BinaryPrefixComparator;
-import org.apache.hadoop.hbase.filter.CompareFilter;
+import org.apache.hadoop.hbase.filter.ByteArrayComparable;
 import org.apache.hadoop.hbase.filter.Filter;
 import org.apache.hadoop.hbase.filter.QualifierFilter;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Repository;
 
-import javax.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * @author Woonduk Kang(emeroad)
+ * @author Taejin Koo
  */
 @Repository
-public class HbaseTraceDaoV2 extends AbstractHbaseDao implements TraceDao {
+public class HbaseTraceDaoV2 implements TraceDao {
 
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
 
-    @Autowired
-    private HbaseOperations2 template2;
+    private static final HbaseColumnFamily.Trace DESCRIPTOR = HbaseColumnFamily.TRACE_V2_SPAN;
 
-    @Autowired
-    @Qualifier("traceRowKeyEncoderV2")
-    private RowKeyEncoder<TransactionId> rowKeyEncoder;
+    private final HbaseOperations template2;
+    private final TableNameProvider tableNameProvider;
 
-    @Autowired
-    @Qualifier("traceRowKeyDecoderV2")
-    private RowKeyDecoder<TransactionId> rowKeyDecoder;
+    private final RowKeyEncoder<TransactionId> rowKeyEncoder;
 
-    private RowMapper<List<SpanBo>> spanMapperV2;
+    private final SpanMapperFactory spanMapperFactory;
 
-    @Value("#{pinpointWebProps['web.hbase.selectSpans.limit'] ?: 500}")
+    @Value("${web.hbase.selectSpans.limit:500}")
     private int selectSpansLimit;
 
-    @Value("#{pinpointWebProps['web.hbase.selectAllSpans.limit'] ?: 500}")
+    @Value("${web.hbase.selectAllSpans.limit:500}")
     private int selectAllSpansLimit;
+
+    @Value("${web.hbase.trace.max.results.limit:50000}")
+    private int traceMaxResultsPerColumnFamily;
 
     private final Filter spanFilter = createSpanQualifierFilter();
 
-    @PostConstruct
-    private void setup() {
-        SpanMapperV2 spanMapperV2 = new SpanMapperV2(rowKeyDecoder);
-        final Logger logger = LoggerFactory.getLogger(spanMapperV2.getClass());
-        if (logger.isDebugEnabled()) {
-            this.spanMapperV2 = CellTraceMapper.wrap(spanMapperV2);
-        } else {
-            this.spanMapperV2 = spanMapperV2;
-        }
+    public HbaseTraceDaoV2(HbaseOperations template2,
+                           TableNameProvider tableNameProvider,
+                           @Qualifier("traceRowKeyEncoderV2") RowKeyEncoder<TransactionId> rowKeyEncoder,
+                           SpanMapperFactory spanMapperFactory) {
+        this.template2 = Objects.requireNonNull(template2, "template2");
+        this.tableNameProvider = Objects.requireNonNull(tableNameProvider, "tableNameProvider");
+        this.rowKeyEncoder = Objects.requireNonNull(rowKeyEncoder, "rowKeyEncoder");
+        this.spanMapperFactory = Objects.requireNonNull(spanMapperFactory, "spanMapperFactory");
     }
 
     @Override
     public List<SpanBo> selectSpan(TransactionId transactionId) {
-        if (transactionId == null) {
-            throw new NullPointerException("transactionId must not be null");
-        }
-
-        byte[] transactionIdRowKey = rowKeyEncoder.encodeRowKey(transactionId);
-        TableName traceTableName = getTableName();
-        return template2.get(traceTableName, transactionIdRowKey, getColumnFamilyName(), spanMapperV2);
+        return selectSpan(transactionId, null).data();
     }
 
+    @Override
+    public FetchResult<List<SpanBo>> selectSpan(TransactionId transactionId, ColumnGetCount columnGetCount) {
+        Objects.requireNonNull(transactionId, "transactionId");
+
+        byte[] transactionIdRowKey = rowKeyEncoder.encodeRowKey(transactionId);
+
+        final Get get = new Get(transactionIdRowKey);
+        get.setMaxResultsPerColumnFamily(traceMaxResultsPerColumnFamily);
+        get.addFamily(DESCRIPTOR.getName());
+        final Filter filter = ColumnGetCount.toFilter(columnGetCount);
+        if (filter != null) {
+            get.setFilter(filter);
+        }
+
+        TableName traceTableName = tableNameProvider.getTableName(DESCRIPTOR.getTable());
+        ResultSizeMapper<List<SpanBo>> resultSizeMapper = new ResultSizeMapper<>();
+        RowMapper<List<SpanBo>> rowMapper = new RowMapperResultAdaptor<>(spanMapperFactory.getSpanMapper(), resultSizeMapper);
+
+        List<SpanBo> spanBos = template2.get(traceTableName, get, rowMapper);
+
+        return new FetchResult<>(resultSizeMapper.getResultSize(), spanBos);
+    }
 
     @Override
     public List<List<SpanBo>> selectSpans(List<GetTraceInfo> getTraceInfoList) {
@@ -102,55 +131,65 @@ public class HbaseTraceDaoV2 extends AbstractHbaseDao implements TraceDao {
         if (CollectionUtils.isEmpty(getTraceInfoList)) {
             return Collections.emptyList();
         }
+        List<SpanQuery> spanQuery = getTraceInfoList.stream()
+                .map(this::toSpanQuery)
+                .collect(Collectors.toList());
+        List<List<SpanQuery>> partitionGetTraceInfoList = partition(spanQuery, eachPartitionSize);
+        return partitionSelect(partitionGetTraceInfoList, DESCRIPTOR.getName(), spanFilter);
+    }
 
-        List<List<GetTraceInfo>> partitionGetTraceInfoList = partition(getTraceInfoList, eachPartitionSize);
-        return partitionSelect(partitionGetTraceInfoList, getColumnFamilyName(), spanFilter);
+    private SpanQuery toSpanQuery(GetTraceInfo getTraceInfo) {
+        SpanQueryBuilder builder = new SpanQueryBuilder();
+        return builder.build(getTraceInfo);
     }
 
     @Override
     public List<List<SpanBo>> selectAllSpans(List<TransactionId> transactionIdList) {
-        return selectAllSpans(transactionIdList, selectAllSpansLimit);
+        return selectAllSpans(transactionIdList, selectAllSpansLimit, null);
     }
 
-    List<List<SpanBo>> selectAllSpans(List<TransactionId> transactionIdList, int eachPartitionSize) {
+    @Override
+    public List<List<SpanBo>> selectAllSpans(List<TransactionId> transactionIdList, ColumnGetCount columnGetCount) {
+        Filter filter = ColumnGetCount.toFilter(columnGetCount);
+        return selectAllSpans(transactionIdList, selectAllSpansLimit, filter);
+    }
+
+    List<List<SpanBo>> selectAllSpans(List<TransactionId> transactionIdList, int eachPartitionSize, Filter filter) {
         if (CollectionUtils.isEmpty(transactionIdList)) {
             return Collections.emptyList();
         }
 
-        List<GetTraceInfo> getTraceInfoList = new ArrayList<>(transactionIdList.size());
-        for (TransactionId transactionId : transactionIdList) {
-            getTraceInfoList.add(new GetTraceInfo(transactionId));
-        }
+        List<SpanQuery> getTraceInfoList = transactionIdList.stream()
+                .map(SpanQuery::new)
+                .collect(Collectors.toList());
 
-        List<List<GetTraceInfo>> partitionGetTraceInfoList = partition(getTraceInfoList, eachPartitionSize);
-        return partitionSelect(partitionGetTraceInfoList, getColumnFamilyName(), null);
+        List<List<SpanQuery>> partitionGetTraceInfoList = partition(getTraceInfoList, eachPartitionSize);
+        return partitionSelect(partitionGetTraceInfoList, DESCRIPTOR.getName(), filter);
     }
 
-    private List<List<GetTraceInfo>> partition(List<GetTraceInfo> getTraceInfoList, int maxTransactionIdListSize) {
-        return Lists.partition(getTraceInfoList, maxTransactionIdListSize);
+    private List<List<SpanQuery>> partition(List<SpanQuery> getTraceInfoList, int maxTransactionIdListSize) {
+        return ListUtils.partition(getTraceInfoList, maxTransactionIdListSize);
     }
 
-    private List<List<SpanBo>> partitionSelect(List<List<GetTraceInfo>> partitionGetTraceInfoList, byte[] columnFamily, Filter filter) {
+    private List<List<SpanBo>> partitionSelect(List<List<SpanQuery>> partitionGetTraceInfoList, byte[] columnFamily, Filter filter) {
         if (CollectionUtils.isEmpty(partitionGetTraceInfoList)) {
             return Collections.emptyList();
         }
-        if (columnFamily == null) {
-            throw new NullPointerException("columnFamily must not be null.");
-        }
+        Objects.requireNonNull(columnFamily, "columnFamily");
 
         List<List<SpanBo>> spanBoList = new ArrayList<>();
-        for (List<GetTraceInfo> getTraceInfoList : partitionGetTraceInfoList) {
+        for (List<SpanQuery> getTraceInfoList : partitionGetTraceInfoList) {
             List<List<SpanBo>> result = bulkSelect(getTraceInfoList, columnFamily, filter);
             spanBoList.addAll(result);
         }
         return spanBoList;
     }
 
-    private List<List<SpanBo>> bulkSelect(List<GetTraceInfo> getTraceInfoList, byte[] columnFamily, Filter filter) {
+    private List<List<SpanBo>> bulkSelect(List<SpanQuery> getTraceInfoList, byte[] columnFamily, Filter filter) {
         if (CollectionUtils.isEmpty(getTraceInfoList)) {
             return Collections.emptyList();
         }
-        Assert.requireNonNull(columnFamily, "columnFamily must not be null");
+        Objects.requireNonNull(columnFamily, "columnFamily");
 
         List<Get> getList = createGetList(getTraceInfoList, columnFamily, filter);
 
@@ -158,49 +197,45 @@ public class HbaseTraceDaoV2 extends AbstractHbaseDao implements TraceDao {
         return bulkSelect0(getList, spanMapperAdaptor);
     }
 
-    private RowMapper<List<SpanBo>> newRowMapper(List<GetTraceInfo> getTraceInfoList) {
-        RequestAwareRowMapper<List<SpanBo>, GetTraceInfo> getTraceInfoRowMapper = new RequestAwareDynamicRowMapper<>(this::getSpanMapper);
-        return new RequestAwareRowMapperAdaptor<List<SpanBo>, GetTraceInfo>(getTraceInfoList, getTraceInfoRowMapper);
+    private RowMapper<List<SpanBo>> newRowMapper(List<SpanQuery> spanQueryList) {
+        RequestAwareRowMapper<List<SpanBo>, SpanQuery> getTraceInfoRowMapper = new RequestAwareDynamicRowMapper<>(this::getSpanMapper);
+        return new RequestAwareRowMapperAdaptor<>(spanQueryList, getTraceInfoRowMapper);
     }
 
 
-    private RowMapper<List<SpanBo>> getSpanMapper(GetTraceInfo getTraceInfo) {
-        final SpanHint hint = getTraceInfo.getHint();
-        if (hint.isSet()) {
-            final SpanDecoder targetSpanDecoder = new TargetSpanDecoder(new SpanDecoderV0(), getTraceInfo);
-            final RowMapper<List<SpanBo>> spanMapper = new SpanMapperV2(rowKeyDecoder, targetSpanDecoder);
-            return spanMapper;
-        } else {
-            return spanMapperV2;
-        }
+    private RowMapper<List<SpanBo>> getSpanMapper(SpanQuery spanQuery) {
+        return spanMapperFactory.getSpanMapper(spanQuery.getSpanFilter());
     }
 
-
-    private List<Get> createGetList(List<GetTraceInfo> getTraceInfoList, byte[] columnFamily, Filter filter) {
-        if (CollectionUtils.isEmpty(getTraceInfoList)) {
+    private List<Get> createGetList(List<SpanQuery> spanQueryList, byte[] columnFamily, Filter defaultFilter) {
+        if (CollectionUtils.isEmpty(spanQueryList)) {
             return Collections.emptyList();
         }
-        final List<Get> getList = new ArrayList<>(getTraceInfoList.size());
-        for (GetTraceInfo getTraceInfo : getTraceInfoList) {
-            final Get get = createGet(getTraceInfo.getTransactionId(), columnFamily, filter);
+        final List<Get> getList = new ArrayList<>(spanQueryList.size());
+        for (SpanQuery spanQuery : spanQueryList) {
+            Filter spanQueryFilter = spanQuery.getHbaseFilter();
+            Filter filter = HBaseUtils.newFilterList(defaultFilter, spanQueryFilter);
+
+            final Get get = createGet(spanQuery.getTransactionId(), columnFamily, filter);
             getList.add(get);
         }
         return getList;
     }
+
 
     private List<List<SpanBo>> bulkSelect0(List<Get> multiGet, RowMapper<List<SpanBo>> rowMapperList) {
         if (CollectionUtils.isEmpty(multiGet)) {
             return Collections.emptyList();
         }
 
-        TableName traceTableName = getTableName();
+        TableName traceTableName = tableNameProvider.getTableName(DESCRIPTOR.getTable());
         return template2.get(traceTableName, multiGet, rowMapperList);
     }
 
     private Get createGet(TransactionId transactionId, byte[] columnFamily, Filter filter) {
         byte[] transactionIdRowKey = rowKeyEncoder.encodeRowKey(transactionId);
         final Get get = new Get(transactionIdRowKey);
-
+        get.setMaxResultsPerColumnFamily(traceMaxResultsPerColumnFamily);
         get.addFamily(columnFamily);
         if (filter != null) {
             get.setFilter(filter);
@@ -208,16 +243,11 @@ public class HbaseTraceDaoV2 extends AbstractHbaseDao implements TraceDao {
         return get;
     }
 
-    public QualifierFilter createSpanQualifierFilter() {
+    public Filter createSpanQualifierFilter() {
         byte indexPrefix = SpanEncoder.TYPE_SPAN;
-        BinaryPrefixComparator prefixComparator = new BinaryPrefixComparator(new byte[]{indexPrefix});
-        QualifierFilter qualifierPrefixFilter = new QualifierFilter(CompareFilter.CompareOp.EQUAL, prefixComparator);
-        return qualifierPrefixFilter;
+        ByteArrayComparable prefixComparator = new BinaryPrefixComparator(new byte[]{indexPrefix});
+        return new QualifierFilter(CompareOperator.EQUAL, prefixComparator);
     }
 
-    @Override
-    public HbaseColumnFamily getColumnFamily() {
-        return HbaseColumnFamily.TRACE_V2_SPAN;
-    }
 
 }

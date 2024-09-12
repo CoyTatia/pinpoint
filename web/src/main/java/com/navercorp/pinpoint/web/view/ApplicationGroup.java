@@ -16,26 +16,24 @@
 
 package com.navercorp.pinpoint.web.view;
 
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.fasterxml.jackson.annotation.JsonValue;
 import com.navercorp.pinpoint.web.vo.Application;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author emeroad
  */
-@JsonSerialize(using = ApplicationGroupSerializer.class)
 public class ApplicationGroup {
 
     private final List<Application> applicationList;
 
     public ApplicationGroup(List<Application> applicationList) {
-        if (applicationList == null) {
-            throw new NullPointerException("applicationList must not be null");
-        }
-        this.applicationList = applicationList;
+        this.applicationList = Objects.requireNonNull(applicationList, "applicationList");
     }
 
+    @JsonValue
     public List<Application> getApplicationList() {
         return applicationList;
     }

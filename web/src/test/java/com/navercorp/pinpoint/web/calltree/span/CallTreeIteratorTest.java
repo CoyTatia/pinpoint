@@ -15,13 +15,10 @@
  */
 package com.navercorp.pinpoint.web.calltree.span;
 
-import static org.junit.Assert.assertEquals;
-
-import org.apache.commons.collections.CollectionUtils;
-import org.junit.Test;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.commons.collections4.CollectionUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
@@ -30,18 +27,37 @@ import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.LinkedBlockingQueue;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 /**
  * @author jaehong.kim
  */
 public class CallTreeIteratorTest {
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
 
     private static final boolean SYNC = false;
     private static final boolean ASYNC = true;
     private static final long START_TIME = 1430983914531L;
     private static final int ELAPSED = 10;
 
-    private CallTreeFactory factory = new CallTreeFactory();
+    private final CallTreeFactory factory = new CallTreeFactory();
+
+    @Test
+    public void rootIsNull() {
+        CallTreeIterator iterator = new CallTreeIterator(null);
+        List<Align> list = iterator.values();
+        assertNotNull(list);
+        assertFalse(iterator.hasNext());
+        assertNull(iterator.next());
+        assertFalse(iterator.hasPrev());
+        assertNull(iterator.prev());
+        assertTrue(iterator.isEmpty());
+        assertEquals(0, iterator.size());
+    }
 
     @Test
     public void internal00() {
@@ -472,9 +488,9 @@ public class CallTreeIteratorTest {
             for (CallTreeNode callTreeNode : callTree) {
                 Align align = callTreeNode.getAlign();
                 final StackEvent stackEvent = stackEventQueue.poll();
-                assertEquals("depth " + index, stackEvent.getDepth(), align.getDepth());
-                assertEquals("gap " + index, stackEvent.getGap(), align.getGap());
-                assertEquals("exec " + index, stackEvent.getExec(), align.getExecutionMilliseconds());
+                assertEquals(stackEvent.getDepth(), align.getDepth(), "depth " + index);
+                assertEquals(stackEvent.getGap(), align.getGap(), "gap " + index);
+                assertEquals(stackEvent.getExec(), align.getExecutionMilliseconds(), "exec " + index);
                 index++;
             }
         }
@@ -509,14 +525,17 @@ public class CallTreeIteratorTest {
             buffer.append(align.getStartTime());
             buffer.append(", lastTime=");
             buffer.append(align.getEndTime());
-            if (!align.isSpan()) {
-                buffer.append(", nextAsyncId=");
-                buffer.append(align.getSpanEventBo().getNextAsyncId());
+            if (align.isAsync()) {
                 buffer.append(", asyncId=");
-                buffer.append(align.getSpanEventBo().getAsyncId());
+                buffer.append(align.getAsyncId());
+            } else if (!align.isSpan()) {
+                int nextAsyncId = align.getSpanEventBo().getNextAsyncId();
+                if (nextAsyncId != -1) {
+                    buffer.append(", nextAsyncId=");
+                    buffer.append(nextAsyncId);
+                }
             }
             buffer.append("\n");
-
         }
         logger.debug(buffer.toString());
     }
@@ -536,7 +555,7 @@ public class CallTreeIteratorTest {
     }
 
 
-    class CallStackDummy {
+    static class CallStackDummy {
         final List<StackEvent> stackEvents = new ArrayList<>();
 
         public void add(String event, int depth, int gap, int exec) {
@@ -565,7 +584,7 @@ public class CallTreeIteratorTest {
         private final int exec;
 
         public StackEvent(String event, int depth, int gap, int exec) {
-            this.event = Objects.requireNonNull(event, "event must not be null");
+            this.event = Objects.requireNonNull(event, "event");
             this.depth = depth;
             this.gap = gap;
             this.exec = exec;

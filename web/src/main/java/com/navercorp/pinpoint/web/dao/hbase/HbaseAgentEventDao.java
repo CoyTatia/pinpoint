@@ -1,11 +1,11 @@
 /*
- * Copyright 2015 NAVER Corp.
+ * Copyright 2019 NAVER Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,105 +17,115 @@
 package com.navercorp.pinpoint.web.dao.hbase;
 
 import com.navercorp.pinpoint.common.hbase.HbaseColumnFamily;
-import com.navercorp.pinpoint.common.hbase.HbaseOperations2;
-import com.navercorp.pinpoint.common.hbase.HbaseTableConstatns;
+import com.navercorp.pinpoint.common.hbase.HbaseOperations;
+import com.navercorp.pinpoint.common.hbase.ResultsExtractor;
 import com.navercorp.pinpoint.common.hbase.RowMapper;
+import com.navercorp.pinpoint.common.hbase.TableNameProvider;
+import com.navercorp.pinpoint.common.hbase.util.Gets;
 import com.navercorp.pinpoint.common.server.bo.event.AgentEventBo;
+import com.navercorp.pinpoint.common.server.bo.serializer.agent.AgentIdRowKeyEncoder;
+import com.navercorp.pinpoint.common.server.dao.hbase.mapper.ListMergeResultsExtractor;
 import com.navercorp.pinpoint.common.server.util.AgentEventType;
-import com.navercorp.pinpoint.common.server.util.RowKeyUtils;
-import com.navercorp.pinpoint.common.util.BytesUtils;
-import com.navercorp.pinpoint.common.util.TimeUtils;
+import com.navercorp.pinpoint.common.server.util.time.Range;
+import com.navercorp.pinpoint.common.util.CollectionUtils;
 import com.navercorp.pinpoint.web.dao.AgentEventDao;
-import com.navercorp.pinpoint.web.mapper.AgentEventResultsExtractor;
-import com.navercorp.pinpoint.web.vo.Range;
-
-import org.apache.commons.collections.CollectionUtils;
+import com.navercorp.pinpoint.web.service.component.AgentEventQuery;
 import org.apache.hadoop.hbase.TableName;
+import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.Scan;
-import org.apache.hadoop.hbase.filter.BinaryComparator;
-import org.apache.hadoop.hbase.filter.CompareFilter;
-import org.apache.hadoop.hbase.filter.FilterList;
-import org.apache.hadoop.hbase.filter.QualifierFilter;
+import org.apache.hadoop.hbase.filter.Filter;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
-import java.util.Set;
+import java.util.Objects;
 
 /**
  * @author HyunGil Jeong
  */
 @Repository
-public class HbaseAgentEventDao extends AbstractHbaseDao implements AgentEventDao {
+public class HbaseAgentEventDao implements AgentEventDao {
 
     private static final int SCANNER_CACHE_SIZE = 20;
 
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
 
-    @Autowired
-    private HbaseOperations2 hbaseOperations2;
+    private static final HbaseColumnFamily.AgentEvent DESCRIPTOR = HbaseColumnFamily.AGENT_EVENT_EVENTS;
 
-    @Autowired
-    @Qualifier("agentEventMapper")
-    private RowMapper<List<AgentEventBo>> agentEventMapper;
+    private final HbaseOperations hbaseOperations;
 
-    @Autowired
-    private AgentEventResultsExtractor agentEventResultsExtractor;
+    private final TableNameProvider tableNameProvider;
+
+    private final RowMapper<List<AgentEventBo>> agentEventMapper;
+
+    private final ResultsExtractor<List<AgentEventBo>> agentEventResultsExtractor;
+
+    private final AgentIdRowKeyEncoder rowKeyEncoder = new AgentIdRowKeyEncoder();
+
+    private final AgentEventFilterBuilder filterBuilder = new AgentEventFilterBuilder();
+
+    public HbaseAgentEventDao(HbaseOperations hbaseOperations,
+                              TableNameProvider tableNameProvider,
+                              @Qualifier("agentEventMapper")
+                              RowMapper<List<AgentEventBo>> agentEventMapper) {
+        this.hbaseOperations = Objects.requireNonNull(hbaseOperations, "hbaseOperations");
+        this.tableNameProvider = Objects.requireNonNull(tableNameProvider, "tableNameProvider");
+        this.agentEventMapper = Objects.requireNonNull(agentEventMapper, "agentEventMapper");
+        this.agentEventResultsExtractor = new ListMergeResultsExtractor<>(agentEventMapper);
+    }
 
     @Override
-    public List<AgentEventBo> getAgentEvents(String agentId, Range range, Set<AgentEventType> excludeEventTypes) {
-        if (agentId == null) {
-            throw new NullPointerException("agentId must not be null");
-        }
-        if (range == null) {
-            throw new NullPointerException("range must not be null");
-        }
+    public List<AgentEventBo> getAgentEvents(String agentId, Range range, AgentEventQuery query) {
+        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(range, "range");
+        Objects.requireNonNull(query, "query");
 
+        Scan scan = createScan(agentId, range, query);
+
+
+        TableName table = tableNameProvider.getTableName(DESCRIPTOR.getTable());
+        List<AgentEventBo> agentEvents = this.hbaseOperations.find(table, scan, agentEventResultsExtractor);
+        logger.debug("getAgentEvents() query:{} agentEvents:{}", query, agentEvents);
+        return agentEvents;
+    }
+
+
+    private Scan createScan(String agentId, Range range, AgentEventQuery query) {
         Scan scan = new Scan();
-        scan.setMaxVersions(1);
         scan.setCaching(SCANNER_CACHE_SIZE);
 
-        scan.setStartRow(createRowKey(agentId, range.getTo()));
-        scan.setStopRow(createRowKey(agentId, range.getFrom()));
-        scan.addFamily(getColumnFamilyName());
+        scan.withStartRow(createRowKey(agentId, range.getTo()));
+        scan.withStopRow(createRowKey(agentId, range.getFrom()));
+        scan.addFamily(DESCRIPTOR.getName());
 
-        if (!CollectionUtils.isEmpty(excludeEventTypes)) {
-            FilterList filterList = new FilterList(FilterList.Operator.MUST_PASS_ALL);
-            for (AgentEventType excludeEventType : excludeEventTypes) {
-                byte[] excludeQualifier = Bytes.toBytes(excludeEventType.getCode());
-                filterList.addFilter(new QualifierFilter(CompareFilter.CompareOp.NOT_EQUAL, new BinaryComparator(excludeQualifier)));
-            }
-            scan.setFilter(filterList);
+        Filter filter = filterBuilder.queryToFilter(query);
+        if (filter != null) {
+            scan.setFilter(filter);
         }
-
-        TableName agentEventTableName = getTableName();
-        List<AgentEventBo> agentEvents = this.hbaseOperations2.find(agentEventTableName, scan, agentEventResultsExtractor);
-        logger.debug("agentEvents found. {}", agentEvents);
-        return agentEvents;
+        if (query.isOneRowScan()) {
+            scan.setOneRowLimit();
+        }
+        return scan;
     }
 
     @Override
     public AgentEventBo getAgentEvent(String agentId, long eventTimestamp, AgentEventType eventType) {
-        if (agentId == null) {
-            throw new NullPointerException("agentId must not be null");
-        }
+        Objects.requireNonNull(agentId, "agentId");
         if (eventTimestamp < 0) {
             throw new IllegalArgumentException("eventTimestamp must not be less than 0");
         }
-        if (eventType == null) {
-            throw new NullPointerException("eventType must not be null");
-        }
+        Objects.requireNonNull(eventType, "eventType");
 
         final byte[] rowKey = createRowKey(agentId, eventTimestamp);
         byte[] qualifier = Bytes.toBytes(eventType.getCode());
 
-        TableName agentEventTableName = getTableName();
-        List<AgentEventBo> events = this.hbaseOperations2.get(agentEventTableName, rowKey,
-                getColumnFamilyName(), qualifier, this.agentEventMapper);
+        TableName agentEventTableName = tableNameProvider.getTableName(DESCRIPTOR.getTable());
+
+        Get get = Gets.get(rowKey, DESCRIPTOR.getName(), qualifier);
+        List<AgentEventBo> events = this.hbaseOperations.get(agentEventTableName, get, this.agentEventMapper);
         if (CollectionUtils.isEmpty(events)) {
             return null;
         }
@@ -123,14 +133,8 @@ public class HbaseAgentEventDao extends AbstractHbaseDao implements AgentEventDa
     }
 
     private byte[] createRowKey(String agentId, long timestamp) {
-        byte[] agentIdKey = BytesUtils.toBytes(agentId);
-        long reverseTimestamp = TimeUtils.reverseTimeMillis(timestamp);
-        return RowKeyUtils.concatFixedByteAndLong(agentIdKey, HbaseTableConstatns.AGENT_NAME_MAX_LEN, reverseTimestamp);
+        return rowKeyEncoder.encodeRowKey(agentId, timestamp);
     }
 
-    @Override
-    public HbaseColumnFamily getColumnFamily() {
-        return HbaseColumnFamily.AGENT_EVENT_EVENTS;
-    }
 
 }

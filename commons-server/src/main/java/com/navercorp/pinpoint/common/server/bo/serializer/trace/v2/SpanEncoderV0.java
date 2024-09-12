@@ -3,19 +3,19 @@ package com.navercorp.pinpoint.common.server.bo.serializer.trace.v2;
 import com.navercorp.pinpoint.common.buffer.AutomaticBuffer;
 import com.navercorp.pinpoint.common.buffer.Buffer;
 import com.navercorp.pinpoint.common.server.bo.AnnotationBo;
+import com.navercorp.pinpoint.common.server.bo.AnnotationTranscoder;
 import com.navercorp.pinpoint.common.server.bo.BasicSpan;
 import com.navercorp.pinpoint.common.server.bo.LocalAsyncIdBo;
 import com.navercorp.pinpoint.common.server.bo.SpanBo;
 import com.navercorp.pinpoint.common.server.bo.SpanChunkBo;
 import com.navercorp.pinpoint.common.server.bo.SpanEventBo;
-import com.navercorp.pinpoint.common.server.bo.serializer.trace.v2.bitfield.SpanBitFiled;
+import com.navercorp.pinpoint.common.server.bo.serializer.trace.v2.bitfield.SpanBitField;
 import com.navercorp.pinpoint.common.server.bo.serializer.trace.v2.bitfield.SpanEventBitField;
 import com.navercorp.pinpoint.common.server.bo.serializer.trace.v2.bitfield.SpanEventQualifierBitField;
-import com.navercorp.pinpoint.common.server.bo.AnnotationTranscoder;
 import com.navercorp.pinpoint.io.SpanVersion;
-import org.apache.commons.collections.CollectionUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.commons.collections4.CollectionUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Component;
 
 import java.nio.ByteBuffer;
@@ -26,7 +26,7 @@ import java.util.List;
  */
 @Component
 public class SpanEncoderV0 implements SpanEncoder {
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
     private static final AnnotationTranscoder transcoder = new AnnotationTranscoder();
 
     @Override
@@ -67,13 +67,14 @@ public class SpanEncoderV0 implements SpanEncoder {
                 buffer.putInt(localAsyncId.getAsyncId());
                 buffer.putVInt(localAsyncId.getSequence());
             }
-        } else {
+        }
+//        else {
             // simple trace case
 //            buffer.putSVInt((short) -1);
 
 //            byte cfBitField = SpanEventQualifierBitField.setAsync((byte) 0, false);
 //            buffer.putByte(cfBitField);
-        }
+//        }
 
         return buffer.wrapByteBuffer();
     }
@@ -129,7 +130,7 @@ public class SpanEncoderV0 implements SpanEncoder {
     public ByteBuffer encodeSpanColumnValue(SpanEncodingContext<SpanBo> encodingContext) {
         final SpanBo span = encodingContext.getValue();
 
-        final SpanBitFiled bitField = SpanBitFiled.build(span);
+        final SpanBitField bitField = SpanBitField.build(span);
 
         final Buffer buffer = new AutomaticBuffer(256);
 
@@ -220,11 +221,6 @@ public class SpanEncoderV0 implements SpanEncoder {
         buffer.putSVInt(spanEventBo.getDepth());
         buffer.putShort(spanEventBo.getServiceType());
 
-
-        if (bitField.isSetRpc()) {
-            buffer.putPrefixedString(spanEventBo.getRpc());
-        }
-
         if (bitField.isSetEndPoint()) {
             buffer.putPrefixedString(spanEventBo.getEndPoint());
         }
@@ -314,10 +310,6 @@ public class SpanEncoderV0 implements SpanEncoder {
 
         buffer.putSVInt(spanEventBo.getApiId());
 
-        if (bitField.isSetRpc()) {
-            buffer.putPrefixedString(spanEventBo.getRpc());
-        }
-
         if (bitField.isSetEndPoint()) {
             buffer.putPrefixedString(spanEventBo.getEndPoint());
         }
@@ -341,11 +333,6 @@ public class SpanEncoderV0 implements SpanEncoder {
 
         if (bitField.isSetNextAsyncId()) {
             buffer.putSVInt(spanEventBo.getNextAsyncId());
-        }
-
-        if (bitField.isSetAsyncId()) {
-            buffer.putInt(spanEventBo.getAsyncId());
-            buffer.putVInt(spanEventBo.getAsyncSequence());
         }
     }
 

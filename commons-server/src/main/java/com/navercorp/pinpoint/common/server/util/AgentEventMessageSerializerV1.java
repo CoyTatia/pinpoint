@@ -22,6 +22,8 @@ import com.navercorp.pinpoint.common.server.bo.event.DeadlockBo;
 import com.navercorp.pinpoint.common.server.bo.event.MonitorInfoBo;
 import com.navercorp.pinpoint.common.server.bo.event.ThreadDumpBo;
 
+import java.util.Objects;
+
 /**
  * @author jaehong.kim
  * AgentEventBo.version is 1
@@ -29,12 +31,11 @@ import com.navercorp.pinpoint.common.server.bo.event.ThreadDumpBo;
 public class AgentEventMessageSerializerV1 {
 
     public byte[] serialize(AgentEventType agentEventType, Object eventMessage) {
-        if (agentEventType == null) {
-            throw new NullPointerException("agentEventType must not be null");
-        }
+        Objects.requireNonNull(agentEventType, "agentEventType");
 
-        if (eventMessage instanceof DeadlockBo) {
-            return serializeDeadlockBo((DeadlockBo) eventMessage);
+
+        if (eventMessage instanceof DeadlockBo deadlockBo) {
+            return serializeDeadlockBo(deadlockBo);
         }
 
         throw new IllegalArgumentException("Unsupported event message type [" + eventMessage.getClass().getName() + "]");

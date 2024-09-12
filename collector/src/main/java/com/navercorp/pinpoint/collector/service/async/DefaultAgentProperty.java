@@ -16,22 +16,36 @@
 
 package com.navercorp.pinpoint.collector.service.async;
 
-import com.navercorp.pinpoint.common.util.Assert;
-
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * @author Woonduk Kang(emeroad)
+ * @author jaehong.kim
  */
 public class DefaultAgentProperty implements AgentProperty {
+    private final String applicationName;
     private final String agentId;
     private final long agentStartTime;
     private final Map<String, Object> properties;
+    private final short serviceType;
 
-    public DefaultAgentProperty(String agentId, long agentStartTime, Map<String, Object> properties) {
-        this.agentId = Assert.requireNonNull(agentId, "agentId must not be null");
-        this.agentStartTime = Assert.requireNonNull(agentStartTime, "agentStartTime must not be null");
-        this.properties = Assert.requireNonNull(properties, "properties must not be null");
+    public DefaultAgentProperty(String applicationName, short serviceType, String agentId, long agentStartTime, Map<String, Object> properties) {
+        this.applicationName = Objects.requireNonNull(applicationName, "applicationName");
+        this.serviceType = serviceType;
+        this.agentId = Objects.requireNonNull(agentId, "agentId");
+        this.agentStartTime = agentStartTime;
+        this.properties = Objects.requireNonNull(properties, "properties");
+    }
+
+    @Override
+    public String getApplicationName() {
+        return applicationName;
+    }
+
+    @Override
+    public short getServiceType() {
+        return serviceType;
     }
 
     @Override
@@ -52,9 +66,11 @@ public class DefaultAgentProperty implements AgentProperty {
     @Override
     public String toString() {
         return "DefaultAgentProperty{" +
-                "agentId='" + agentId + '\'' +
+                "applicationName='" + applicationName + '\'' +
+                ", agentId='" + agentId + '\'' +
                 ", agentStartTime=" + agentStartTime +
                 ", properties=" + properties +
+                ", serviceType=" + serviceType +
                 '}';
     }
 }

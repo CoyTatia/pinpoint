@@ -16,85 +16,48 @@
 
 package com.navercorp.pinpoint.collector.handler.grpc;
 
+import com.google.protobuf.GeneratedMessageV3;
 import com.navercorp.pinpoint.collector.handler.SimpleHandler;
-import com.navercorp.pinpoint.collector.mapper.grpc.stat.GrpcAgentStatBatchMapper;
-import com.navercorp.pinpoint.collector.mapper.grpc.stat.GrpcAgentStatMapper;
-import com.navercorp.pinpoint.collector.service.AgentStatService;
-import com.navercorp.pinpoint.common.server.bo.stat.AgentStatBo;
-import com.navercorp.pinpoint.grpc.AgentHeaderFactory;
-import com.navercorp.pinpoint.grpc.Header;
-import com.navercorp.pinpoint.grpc.MessageFormatUtils;
-import com.navercorp.pinpoint.grpc.server.ServerContext;
-import com.navercorp.pinpoint.grpc.trace.PAgentStat;
-import com.navercorp.pinpoint.grpc.trace.PAgentStatBatch;
 import com.navercorp.pinpoint.io.request.ServerRequest;
 import io.grpc.Status;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Service;
 
-import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author jaehong.kim
  */
 @Service
-public class GrpcAgentStatHandlerV2 implements SimpleHandler {
-    private final Logger logger = LoggerFactory.getLogger(this.getClass().getName());
-    private final boolean isDebug = logger.isDebugEnabled();
+public class GrpcAgentStatHandlerV2 implements SimpleHandler<GeneratedMessageV3> {
+    private final Logger logger = LogManager.getLogger(this.getClass());
+    private final GrpcMetricHandler[] metricHandlers;
 
-    @Autowired
-    private GrpcAgentStatMapper agentStatMapper;
 
-    @Autowired
-    private GrpcAgentStatBatchMapper agentStatBatchMapper;
+    public GrpcAgentStatHandlerV2(List<GrpcMetricHandler> metricHandlers) {
+        Objects.requireNonNull(metricHandlers, "metricHandlers");
+        this.metricHandlers = metricHandlers.toArray(new GrpcMetricHandler[]{});
 
-    @Autowired(required = false)
-    private List<AgentStatService> agentStatServiceList = Collections.emptyList();
+        for (GrpcMetricHandler handler : this.metricHandlers) {
+            logger.info("{}:{}", GrpcMetricHandler.class.getSimpleName(), handler);
+        }
+    }
 
     @Override
-    public void handleSimple(ServerRequest serverRequest) {
-        final Object data = serverRequest.getData();
-        if (data instanceof PAgentStat) {
-            handleAgentStat((PAgentStat) data);
-        } else if (data instanceof PAgentStatBatch) {
-            handleAgentStatBatch((PAgentStatBatch) data);
-        } else {
-            logger.warn("Invalid request type. serverRequest={}", serverRequest);
-            throw Status.INTERNAL.withDescription("Bad Request(invalid request type)").asRuntimeException();
+    public void handleSimple(ServerRequest<GeneratedMessageV3> serverRequest) {
+        final GeneratedMessageV3 data = serverRequest.getData();
+
+        for (GrpcMetricHandler messageHandler : metricHandlers) {
+            if (messageHandler.accept(data)) {
+                messageHandler.handle(data);
+                return;
+            }
         }
+
+        logger.warn("Invalid request type. serverRequest={}", serverRequest);
+        throw Status.INTERNAL.withDescription("Bad Request(invalid request type)").asRuntimeException();
     }
 
-    private void handleAgentStat(PAgentStat agentStat) {
-        if (isDebug) {
-            logger.debug("Handle PAgentStat={}", MessageFormatUtils.debugLog(agentStat));
-        }
-
-        final AgentStatBo agentStatBo = this.agentStatMapper.map(agentStat);
-        if (agentStatBo == null) {
-            return;
-        }
-
-        for (AgentStatService agentStatService : agentStatServiceList) {
-            agentStatService.save(agentStatBo);
-        }
-    }
-
-    private void handleAgentStatBatch(PAgentStatBatch agentStatBatch) {
-        if (isDebug) {
-            logger.debug("Handle PAgentStatBatch={}", MessageFormatUtils.debugLog(agentStatBatch));
-        }
-
-        Header header = ServerContext.getAgentInfo();
-        final AgentStatBo agentStatBo = this.agentStatBatchMapper.map(agentStatBatch, header);
-        if (agentStatBo == null) {
-            return;
-        }
-
-        for (AgentStatService agentStatService : agentStatServiceList) {
-            agentStatService.save(agentStatBo);
-        }
-    }
 }

@@ -16,46 +16,41 @@
 
 package com.navercorp.pinpoint.web.applicationmap.histogram;
 
+import com.google.common.collect.Ordering;
+import com.navercorp.pinpoint.common.server.util.time.Range;
+import com.navercorp.pinpoint.common.server.util.timewindow.TimeWindow;
+import com.navercorp.pinpoint.common.server.util.timewindow.TimeWindowDownSampler;
 import com.navercorp.pinpoint.web.applicationmap.rawdata.LinkCallData;
-import com.navercorp.pinpoint.web.util.TimeWindow;
-import com.navercorp.pinpoint.web.util.TimeWindowDownSampler;
 import com.navercorp.pinpoint.web.vo.Application;
-import com.navercorp.pinpoint.web.vo.Range;
 import com.navercorp.pinpoint.web.vo.ResponseTime;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.*;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * @author emeroad
  */
 public class ApplicationTimeHistogramBuilder {
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
+
+    private static final Ordering<TimeHistogram> histogramOrdering = Ordering.from(TimeHistogram.TIME_STAMP_ASC_COMPARATOR);
 
     private final Application application;
-    private final Range range;
     private final TimeWindow window;
 
 
-
     public ApplicationTimeHistogramBuilder(Application application, Range range) {
-        if (application == null) {
-            throw new NullPointerException("application must not be null");
-        }
-        if (range == null) {
-            throw new NullPointerException("range must not be null");
-        }
-        this.application = application;
-        this.range = range;
+        this.application = Objects.requireNonNull(application, "application");
         this.window = new TimeWindow(range, TimeWindowDownSampler.SAMPLER);
     }
 
     public ApplicationTimeHistogram build(List<ResponseTime> responseHistogramList) {
-        if (responseHistogramList == null) {
-            throw new NullPointerException("responseHistogramList must not be null");
-        }
+        Objects.requireNonNull(responseHistogramList, "responseHistogramList");
 
         Map<Long, TimeHistogram> applicationLevelHistogram = new HashMap<>();
 
@@ -79,8 +74,7 @@ public class ApplicationTimeHistogramBuilder {
                 logger.trace("applicationLevel histogram:{}", histogram);
             }
         }
-        ApplicationTimeHistogram applicationTimeHistogram = new ApplicationTimeHistogram(application, range, histogramList);
-        return applicationTimeHistogram;
+        return new ApplicationTimeHistogram(application, histogramList);
     }
 
     public ApplicationTimeHistogram build(Collection<LinkCallData> linkCallDataMapList) {
@@ -103,8 +97,7 @@ public class ApplicationTimeHistogramBuilder {
                 logger.trace("applicationLevel histogram:{}", histogram);
             }
         }
-        ApplicationTimeHistogram applicationTimeHistogram = new ApplicationTimeHistogram(application, range, histogramList);
-        return applicationTimeHistogram;
+        return new ApplicationTimeHistogram(application, histogramList);
 
     }
 
@@ -124,10 +117,7 @@ public class ApplicationTimeHistogramBuilder {
             windowHistogram.add(timeHistogram);
         }
 
-
-        List<TimeHistogram> resultList = new ArrayList<>(resultMap.values());
-        resultList.sort(TimeHistogram.TIME_STAMP_ASC_COMPARATOR);
-        return resultList;
+        return histogramOrdering.sortedCopy(resultMap.values());
     }
 
 }

@@ -17,22 +17,34 @@ package com.navercorp.pinpoint.flink.receiver;
 
 import com.navercorp.pinpoint.flink.Bootstrap;
 import com.navercorp.pinpoint.flink.vo.RawData;
-import org.apache.flink.streaming.api.functions.source.ParallelSourceFunction;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.context.ApplicationContext;
-import org.springframework.context.ConfigurableApplicationContext;
+import org.apache.flink.api.common.ExecutionConfig.GlobalJobParameters;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.io.Serial;
 
 /**
  * @author minwoo.jung
  */
-public class TcpSourceFunction implements ParallelSourceFunction<RawData> {
+public class TcpSourceFunction extends RichParallelSourceFunction<RawData> {
 
-    private final Logger logger = LoggerFactory.getLogger(TcpSourceFunction.class);
+    @Serial
+    private static final long serialVersionUID = -1605300070500115073L;
+
+    private final Logger logger = LogManager.getLogger(TcpSourceFunction.class);
+    private transient GlobalJobParameters globalJobParameters;
+
+
+    @Override
+    public void open(Configuration parameters) throws Exception {
+        globalJobParameters = getRuntimeContext().getExecutionConfig().getGlobalJobParameters();
+    }
 
     @Override
     public void run(SourceContext<RawData> ctx) throws Exception {
-        final Bootstrap bootstrap = Bootstrap.getInstance();
+        final Bootstrap bootstrap = Bootstrap.getInstance(globalJobParameters.toMap());
         bootstrap.setStatHandlerTcpDispatchHandler(ctx);
         bootstrap.initFlinkServerRegister();
         bootstrap.initTcpReceiver();
@@ -43,10 +55,6 @@ public class TcpSourceFunction implements ParallelSourceFunction<RawData> {
     @Override
     public void cancel() {
         logger.info("cancel TcpSourceFunction.");
-
-        ApplicationContext applicationContext = Bootstrap.getInstance().getApplicationContext();
-        if (applicationContext != null) {
-            ((ConfigurableApplicationContext) applicationContext).close();
-        }
+        Bootstrap.close();
     }
 }

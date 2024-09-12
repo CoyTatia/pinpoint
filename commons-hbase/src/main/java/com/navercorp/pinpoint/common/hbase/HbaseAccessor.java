@@ -15,14 +15,14 @@
  */
 package com.navercorp.pinpoint.common.hbase;
 
-import java.nio.charset.Charset;
-
-import com.navercorp.pinpoint.common.Charsets;
 import org.apache.hadoop.conf.Configuration;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+
 /**
- * Base class for {@link HbaseTemplate} and {@link HbaseInterceptor}, defining commons properties such as {@link HTableInterfaceFactory} and {@link Configuration}.
+ * Base class for {@link HbaseTemplate} , defining commons properties such as {@link org.apache.hadoop.hbase.client.Connection} and {@link Configuration}.
  * 
  * Not intended to be used directly.
  * 
@@ -31,9 +31,10 @@ import org.springframework.util.StringUtils;
 public abstract class HbaseAccessor {
 
     private String encoding;
-    private static final Charset CHARSET = Charsets.UTF_8;
+    private static final Charset CHARSET = StandardCharsets.UTF_8;
 
     private TableFactory tableFactory;
+
     private Configuration configuration;
 
     /**
@@ -74,4 +75,5 @@ public abstract class HbaseAccessor {
     public Charset getCharset() {
         return (StringUtils.hasText(encoding) ? Charset.forName(encoding) : CHARSET);
     }
+
 }

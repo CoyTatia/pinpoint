@@ -1,11 +1,11 @@
 /*
- * Copyright 2014 NAVER Corp.
+ * Copyright 2019 NAVER Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,78 +17,57 @@
 package com.navercorp.pinpoint.collector.dao.hbase;
 
 import com.navercorp.pinpoint.collector.dao.MapResponseTimeDao;
-import com.navercorp.pinpoint.collector.dao.hbase.statistics.BulkIncrementer;
+import com.navercorp.pinpoint.collector.dao.hbase.statistics.BulkWriter;
 import com.navercorp.pinpoint.collector.dao.hbase.statistics.CallRowKey;
 import com.navercorp.pinpoint.collector.dao.hbase.statistics.ColumnName;
+import com.navercorp.pinpoint.collector.dao.hbase.statistics.MapLinkConfiguration;
 import com.navercorp.pinpoint.collector.dao.hbase.statistics.ResponseColumnName;
 import com.navercorp.pinpoint.collector.dao.hbase.statistics.RowKey;
-import com.navercorp.pinpoint.common.hbase.HbaseColumnFamily;
-import com.navercorp.pinpoint.common.hbase.HbaseOperations2;
 import com.navercorp.pinpoint.common.server.util.AcceptedTimeService;
+import com.navercorp.pinpoint.common.server.util.ApplicationMapStatisticsUtils;
+import com.navercorp.pinpoint.common.server.util.TimeSlot;
+import com.navercorp.pinpoint.common.trace.HistogramSchema;
 import com.navercorp.pinpoint.common.trace.ServiceType;
-import com.navercorp.pinpoint.common.util.ApplicationMapStatisticsUtils;
-import com.navercorp.pinpoint.common.util.TimeSlot;
-
-import com.sematext.hbase.wd.RowKeyDistributorByHashPrefix;
-import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.Increment;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Repository;
 
-import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 
 /**
  * Save response time data of WAS
- * 
+ *
  * @author netspider
  * @author emeroad
  * @author jaehong.kim
  * @author HyunGil Jeong
  */
 @Repository
-public class HbaseMapResponseTimeDao extends AbstractHbaseDao implements MapResponseTimeDao {
+public class HbaseMapResponseTimeDao implements MapResponseTimeDao {
 
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
 
-    @Autowired
-    private HbaseOperations2 hbaseTemplate;
+    private final AcceptedTimeService acceptedTimeService;
 
-    @Autowired
-    private AcceptedTimeService acceptedTimeService;
+    private final TimeSlot timeSlot;
+    private final BulkWriter bulkWriter;
+    private final MapLinkConfiguration mapLinkConfiguration;
 
-    @Autowired
-    private TimeSlot timeSlot;
-
-    @Autowired
-    @Qualifier("selfBulkIncrementer")
-    private BulkIncrementer bulkIncrementer;
-
-    @Autowired
-    @Qualifier("statisticsSelfRowKeyDistributor")
-    private RowKeyDistributorByHashPrefix rowKeyDistributorByHashPrefix;
-
-    private final boolean useBulk;
-
-    public HbaseMapResponseTimeDao() {
-        this(true);
+    public HbaseMapResponseTimeDao(MapLinkConfiguration mapLinkConfiguration,
+                                   AcceptedTimeService acceptedTimeService, TimeSlot timeSlot,
+                                   @Qualifier("selfBulkWriter") BulkWriter bulkWriter) {
+        this.mapLinkConfiguration = Objects.requireNonNull(mapLinkConfiguration, "mapLinkConfiguration");
+        this.acceptedTimeService = Objects.requireNonNull(acceptedTimeService, "acceptedTimeService");
+        this.timeSlot = Objects.requireNonNull(timeSlot, "timeSlot");
+        this.bulkWriter = Objects.requireNonNull(bulkWriter, "bulkWrtier");
     }
 
-    public HbaseMapResponseTimeDao(boolean useBulk) {
-        this.useBulk = useBulk;
-    }
 
     @Override
     public void received(String applicationName, ServiceType applicationServiceType, String agentId, int elapsed, boolean isError) {
-        if (applicationName == null) {
-            throw new NullPointerException("applicationName must not be null");
-        }
-        if (agentId == null) {
-            throw new NullPointerException("agentId must not be null");
-        }
+        Objects.requireNonNull(applicationName, "applicationName");
+        Objects.requireNonNull(agentId, "agentId");
 
         if (logger.isDebugEnabled()) {
             logger.debug("[Received] {} ({})[{}]", applicationName, applicationServiceType, agentId);
@@ -101,53 +80,48 @@ public class HbaseMapResponseTimeDao extends AbstractHbaseDao implements MapResp
 
         final short slotNumber = ApplicationMapStatisticsUtils.getSlotNumber(applicationServiceType, elapsed, isError);
         final ColumnName selfColumnName = new ResponseColumnName(agentId, slotNumber);
-        if (useBulk) {
-            TableName mapStatisticsSelfTableName = getTableName();
-            bulkIncrementer.increment(mapStatisticsSelfTableName, selfRowKey, selfColumnName);
-        } else {
-            final byte[] rowKey = getDistributedKey(selfRowKey.getRowKey());
-            // column name is the name of caller app.
-            byte[] columnName = selfColumnName.getColumnName();
-            increment(rowKey, columnName, 1L);
+        this.bulkWriter.increment(selfRowKey, selfColumnName);
+
+        HistogramSchema histogramSchema = applicationServiceType.getHistogramSchema();
+        if (mapLinkConfiguration.isEnableAvg()) {
+            final ColumnName sumColumnName = new ResponseColumnName(agentId, histogramSchema.getSumStatSlot().getSlotTime());
+            this.bulkWriter.increment(selfRowKey, sumColumnName, elapsed);
+        }
+
+        final ColumnName maxColumnName = new ResponseColumnName(agentId, histogramSchema.getMaxStatSlot().getSlotTime());
+        if (mapLinkConfiguration.isEnableMax()) {
+            this.bulkWriter.updateMax(selfRowKey, maxColumnName, elapsed);
         }
     }
 
-    private void increment(byte[] rowKey, byte[] columnName, long increment) {
-        if (rowKey == null) {
-            throw new NullPointerException("rowKey must not be null");
+    @Override
+    public void updatePing(String applicationName, ServiceType applicationServiceType, String agentId, int elapsed, boolean isError) {
+        Objects.requireNonNull(applicationName, "applicationName");
+        Objects.requireNonNull(agentId, "agentId");
+
+        if (logger.isDebugEnabled()) {
+            logger.debug("[Received] {} ({})[{}]", applicationName, applicationServiceType, agentId);
         }
-        if (columnName == null) {
-            throw new NullPointerException("columnName must not be null");
-        }
-        TableName mapStatisticsSelfTableName = getTableName();
-        hbaseTemplate.incrementColumnValue(mapStatisticsSelfTableName, rowKey, getColumnFamilyName(), columnName, increment);
+
+        // make row key. rowkey is me
+        final long acceptedTime = acceptedTimeService.getAcceptedTime();
+        final long rowTimeSlot = timeSlot.getTimeSlot(acceptedTime);
+        final RowKey selfRowKey = new CallRowKey(applicationName, applicationServiceType.getCode(), rowTimeSlot);
+
+        final short slotNumber = ApplicationMapStatisticsUtils.getPingSlotNumber(applicationServiceType, elapsed, isError);
+        final ColumnName selfColumnName = new ResponseColumnName(agentId, slotNumber);
+        this.bulkWriter.increment(selfRowKey, selfColumnName);
     }
 
 
     @Override
-    public void flushAll() {
-        if (!useBulk) {
-            throw new IllegalStateException("useBulk is " + useBulk);
-        }
-
-        Map<TableName, List<Increment>> incrementMap = bulkIncrementer.getIncrements(rowKeyDistributorByHashPrefix);
-        for (Map.Entry<TableName, List<Increment>> e : incrementMap.entrySet()) {
-            TableName tableName = e.getKey();
-            List<Increment> increments = e.getValue();
-            if (logger.isDebugEnabled()) {
-                logger.debug("flush {} to [{}] Increment:{}", this.getClass().getSimpleName(), tableName.getNameAsString(), increments.size());
-            }
-            hbaseTemplate.increment(tableName, increments);
-        }
-    }
-
-    private byte[] getDistributedKey(byte[] rowKey) {
-        return rowKeyDistributorByHashPrefix.getDistributedKey(rowKey);
+    public void flushLink() {
+        this.bulkWriter.flushLink();
     }
 
     @Override
-    public HbaseColumnFamily getColumnFamily() {
-        return HbaseColumnFamily.MAP_STATISTICS_SELF_VER2_COUNTER;
+    public void flushAvgMax() {
+        this.bulkWriter.flushAvgMax();
     }
 
 }

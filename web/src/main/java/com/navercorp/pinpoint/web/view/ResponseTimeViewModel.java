@@ -17,27 +17,26 @@
 package com.navercorp.pinpoint.web.view;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.databind.JsonSerializer;
+import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 
+import java.io.IOException;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author emeroad
  */
-public class ResponseTimeViewModel {
+public class ResponseTimeViewModel implements TimeViewModel {
 
     private final String columnName;
     private final List<TimeCount> columnValue;
 
     public ResponseTimeViewModel(String columnName, List<TimeCount> columnValue) {
-        if (columnName == null) {
-            throw new NullPointerException("columnName must not be null");
-        }
-        if (columnValue == null) {
-            throw new NullPointerException("columnValue must not be null");
-        }
-        this.columnName = columnName;
-        this.columnValue = columnValue;
+        this.columnName = Objects.requireNonNull(columnName, "columnName");
+        this.columnValue = Objects.requireNonNull(columnValue, "columnValue");
     }
 
     @JsonProperty("key")
@@ -50,23 +49,17 @@ public class ResponseTimeViewModel {
         return columnValue;
     }
 
-    @JsonSerialize(using=TimeCountSerializer.class)
-    public static class TimeCount {
+    @JsonSerialize(using = TimeCountSerializer.class)
+    public record TimeCount(long time, long count) {
+    }
 
-        private final long time;
-        private final long count;
-
-        public TimeCount(long time, long count) {
-            this.time = time;
-            this.count = count;
-        }
-
-        public long getTime() {
-            return time;
-        }
-
-        public long getCount() {
-            return count;
+    public static class TimeCountSerializer extends JsonSerializer<TimeCount> {
+        @Override
+        public void serialize(ResponseTimeViewModel.TimeCount count, JsonGenerator jgen, SerializerProvider provider) throws IOException {
+            jgen.writeStartArray();
+            jgen.writeNumber(count.time());
+            jgen.writeNumber(count.count());
+            jgen.writeEndArray();
         }
     }
 

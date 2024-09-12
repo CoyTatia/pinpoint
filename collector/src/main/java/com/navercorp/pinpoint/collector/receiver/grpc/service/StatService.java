@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,10 +20,9 @@ import com.google.protobuf.Empty;
 import com.google.protobuf.GeneratedMessageV3;
 import com.navercorp.pinpoint.collector.receiver.DispatchHandler;
 import com.navercorp.pinpoint.grpc.MessageFormatUtils;
-import com.navercorp.pinpoint.grpc.StatusError;
-import com.navercorp.pinpoint.grpc.StatusErrors;
 import com.navercorp.pinpoint.grpc.trace.PAgentStat;
 import com.navercorp.pinpoint.grpc.trace.PAgentStatBatch;
+import com.navercorp.pinpoint.grpc.trace.PAgentUriStat;
 import com.navercorp.pinpoint.grpc.trace.PStatMessage;
 import com.navercorp.pinpoint.grpc.trace.StatGrpc;
 import com.navercorp.pinpoint.io.header.Header;
@@ -33,71 +32,61 @@ import com.navercorp.pinpoint.io.request.DefaultMessage;
 import com.navercorp.pinpoint.io.request.Message;
 import com.navercorp.pinpoint.io.request.ServerRequest;
 import com.navercorp.pinpoint.thrift.io.DefaultTBaseLocator;
-import io.grpc.Status;
-import io.grpc.StatusException;
-import io.grpc.StatusRuntimeException;
+import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.HashMap;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * @author jaehong.kim
  */
 public class StatService extends StatGrpc.StatImplBase {
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
     private final boolean isDebug = logger.isDebugEnabled();
 
-    private final DispatchHandler dispatchHandler;
-    private final ServerRequestFactory serverRequestFactory = new ServerRequestFactory();
+    private final AtomicLong serverStreamId = new AtomicLong();
 
-    public StatService(DispatchHandler dispatchHandler) {
-        this.dispatchHandler = Objects.requireNonNull(dispatchHandler, "dispatchHandler must not be null");
+    private final DispatchHandler<GeneratedMessageV3, GeneratedMessageV3> dispatchHandler;
+    private final ServerRequestFactory serverRequestFactory;
+    private final StreamCloseOnError streamCloseOnError;
+
+    public StatService(DispatchHandler<GeneratedMessageV3, GeneratedMessageV3> dispatchHandler,
+                       ServerRequestFactory serverRequestFactory,
+                       StreamCloseOnError streamCloseOnError) {
+        this.dispatchHandler = Objects.requireNonNull(dispatchHandler, "dispatchHandler");
+        this.serverRequestFactory = Objects.requireNonNull(serverRequestFactory, "serverRequestFactory");
+        this.streamCloseOnError = Objects.requireNonNull(streamCloseOnError, "streamCloseOnError");
     }
 
     @Override
-    public StreamObserver<PStatMessage> sendAgentStat(StreamObserver<Empty> responseObserver) {
-        StreamObserver<PStatMessage> observer = new StreamObserver<PStatMessage>() {
-            @Override
-            public void onNext(PStatMessage statMessage) {
-                if (isDebug) {
-                    logger.debug("Send PAgentStat={}", MessageFormatUtils.debugLog(statMessage));
-                }
-
-                if (statMessage.hasAgentStat()) {
-                    final Message<PAgentStat> message = newMessage(statMessage.getAgentStat(), DefaultTBaseLocator.AGENT_STAT);
-                    send(responseObserver, message);
-                } else if (statMessage.hasAgentStatBatch()) {
-                    final Message<PAgentStatBatch> message = newMessage(statMessage.getAgentStatBatch(), DefaultTBaseLocator.AGENT_STAT_BATCH);
-                    send(responseObserver, message);
-                } else {
-                    if (isDebug) {
-                        logger.debug("Found empty stat message {}", MessageFormatUtils.debugLog(statMessage));
-                    }
-                }
-            }
-
-            @Override
-            public void onError(Throwable throwable) {
-                final StatusError statusError = StatusErrors.throwable(throwable);
-                if (statusError.isSimpleError()) {
-                    logger.info("Failed to stat stream, cause={}", statusError.getMessage());
-                } else {
-                    logger.warn("Failed to stat stream, cause={}", statusError.getMessage(), statusError.getThrowable());
-                }
-            }
-
-            @Override
-            public void onCompleted() {
-                responseObserver.onNext(Empty.newBuilder().build());
-                responseObserver.onCompleted();
-            }
-        };
-
-        return observer;
+    public StreamObserver<PStatMessage> sendAgentStat(StreamObserver<Empty> responseStream) {
+        final ServerCallStreamObserver<Empty> responseObserver = (ServerCallStreamObserver<Empty>) responseStream;
+        return new ServerCallStream<>(logger, serverStreamId.incrementAndGet(), responseObserver, this::messageDispatch, streamCloseOnError, Empty::getDefaultInstance);
     }
+
+    private void messageDispatch(PStatMessage statMessage, ServerCallStream<PStatMessage, Empty> stream) {
+        if (isDebug) {
+            logger.debug("Send PAgentStat={}", MessageFormatUtils.debugLog(statMessage));
+        }
+
+        if (statMessage.hasAgentStat()) {
+            final Message<PAgentStat> message = newMessage(statMessage.getAgentStat(), DefaultTBaseLocator.AGENT_STAT);
+            dispatch(message, stream);
+        } else if (statMessage.hasAgentStatBatch()) {
+            final Message<PAgentStatBatch> message = newMessage(statMessage.getAgentStatBatch(), DefaultTBaseLocator.AGENT_STAT_BATCH);
+            dispatch(message, stream);
+        } else if (statMessage.hasAgentUriStat()) {
+            final Message<PAgentUriStat> message = newMessage(statMessage.getAgentUriStat(), DefaultTBaseLocator.AGENT_URI_STAT);
+            dispatch(message, stream);
+        } else {
+            logger.info("Found empty stat message {}", MessageFormatUtils.debugLog(statMessage));
+        }
+    }
+
 
     private <T> Message<T> newMessage(T requestData, short serviceType) {
         final Header header = new HeaderV2(Header.SIGNATURE, HeaderV2.VERSION, serviceType);
@@ -105,18 +94,13 @@ public class StatService extends StatGrpc.StatImplBase {
         return new DefaultMessage<>(header, headerEntity, requestData);
     }
 
-    private void send(StreamObserver<Empty> responseObserver, final Message<? extends GeneratedMessageV3> message) {
+    private void dispatch(final Message<? extends GeneratedMessageV3> message, ServerCallStream<PStatMessage, Empty> responseObserver) {
         try {
-            ServerRequest<?> request = serverRequestFactory.newServerRequest(message);
-            this.dispatchHandler.dispatchSendMessage(request);
-        } catch (Exception e) {
-            logger.warn("Failed to request. message={}", message, e);
-            if (e instanceof StatusException || e instanceof StatusRuntimeException) {
-                responseObserver.onError(e);
-            } else {
-                // Avoid detailed exception
-                responseObserver.onError(Status.INTERNAL.withDescription("Bad Request").asException());
-            }
+            ServerRequest<GeneratedMessageV3> request = (ServerRequest<GeneratedMessageV3>) serverRequestFactory.newServerRequest(message);
+            dispatchHandler.dispatchSendMessage(request);
+        } catch (Throwable e) {
+            logger.warn("Failed to request. message={}", MessageFormatUtils.debugLog(message), e);
+            responseObserver.onNextError(e);
         }
     }
 }

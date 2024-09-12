@@ -28,19 +28,17 @@ import com.navercorp.pinpoint.common.server.bo.codec.stat.strategy.UnsignedLongE
 import com.navercorp.pinpoint.common.server.bo.codec.strategy.EncodingStrategy;
 import com.navercorp.pinpoint.common.server.bo.serializer.stat.AgentStatUtils;
 import com.navercorp.pinpoint.common.server.bo.stat.JvmGcDetailedBo;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.util.Assert;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author HyunGil Jeong
  */
-@Component("jvmGcDetailedCodecV2")
+@Component
 public class JvmGcDetailedCodecV2 extends AgentStatCodecV2<JvmGcDetailedBo> {
 
-    @Autowired
     public JvmGcDetailedCodecV2(AgentStatDataPointCodec codec) {
         super(new JvmGcDetailedCodecFactory(codec));
     }
@@ -51,8 +49,7 @@ public class JvmGcDetailedCodecV2 extends AgentStatCodecV2<JvmGcDetailedBo> {
         private final AgentStatDataPointCodec codec;
 
         private JvmGcDetailedCodecFactory(AgentStatDataPointCodec codec) {
-            Assert.notNull(codec, "codec must not be null");
-            this.codec = codec;
+            this.codec = Objects.requireNonNull(codec, "codec");
         }
 
         @Override
@@ -84,8 +81,7 @@ public class JvmGcDetailedCodecV2 extends AgentStatCodecV2<JvmGcDetailedBo> {
         private final UnsignedLongEncodingStrategy.Analyzer.Builder metaspaceUsedStrategyAnalyzerBuilder = new UnsignedLongEncodingStrategy.Analyzer.Builder();
 
         public JvmGcDetailedCodecEncoder(AgentStatDataPointCodec codec) {
-            Assert.notNull(codec, "codec must not be null");
-            this.codec = codec;
+            this.codec = Objects.requireNonNull(codec, "codec");
         }
 
         @Override
@@ -148,8 +144,7 @@ public class JvmGcDetailedCodecV2 extends AgentStatCodecV2<JvmGcDetailedBo> {
         private List<Long> metaspaceUseds;
 
         public JvmGcDetailedCodecDecoder(AgentStatDataPointCodec codec) {
-            Assert.notNull(codec, "codec must not be null");
-            this.codec = codec;
+            this.codec = Objects.requireNonNull(codec, "codec");
         }
 
         @Override

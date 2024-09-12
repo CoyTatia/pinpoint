@@ -15,14 +15,13 @@
  */
 package com.navercorp.pinpoint.web.util;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
-import java.util.Collections;
 import java.util.Enumeration;
 
 /**
@@ -30,7 +29,7 @@ import java.util.Enumeration;
  */
 public class BatchUtils {
 
-    private final static Logger logger = LoggerFactory.getLogger(BatchUtils.class);
+    private final static Logger logger = LogManager.getLogger(BatchUtils.class);
 
     public static boolean decisionBatchServer(String ip) {
         Enumeration<NetworkInterface> interfaces;

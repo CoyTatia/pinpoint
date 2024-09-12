@@ -17,52 +17,69 @@
 package com.navercorp.pinpoint.collector.dao.hbase;
 
 import com.navercorp.pinpoint.collector.dao.StringMetaDataDao;
+import com.navercorp.pinpoint.collector.util.CollectorUtils;
 import com.navercorp.pinpoint.common.hbase.HbaseColumnFamily;
-import com.navercorp.pinpoint.common.hbase.HbaseOperations2;
+import com.navercorp.pinpoint.common.hbase.HbaseOperations;
+import com.navercorp.pinpoint.common.hbase.TableNameProvider;
 import com.navercorp.pinpoint.common.server.bo.StringMetaDataBo;
-
+import com.navercorp.pinpoint.common.server.bo.serializer.RowKeyEncoder;
+import com.navercorp.pinpoint.common.server.bo.serializer.metadata.MetaDataRowKey;
+import com.navercorp.pinpoint.common.server.bo.serializer.metadata.MetadataEncoder;
 import com.sematext.hbase.wd.RowKeyDistributorByHashPrefix;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Repository;
+
+import java.util.Objects;
 
 /**
  * @author emeroad
  * @author minwoo.jung
  */
 @Repository
-public class HbaseStringMetaDataDao extends AbstractHbaseDao implements StringMetaDataDao {
+public class HbaseStringMetaDataDao implements StringMetaDataDao {
 
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
 
-    @Autowired
-    private HbaseOperations2 hbaseTemplate;
+    private static final HbaseColumnFamily.StringMetadataStr DESCRIPTOR = HbaseColumnFamily.STRING_METADATA_STR;
 
-    @Autowired
-    @Qualifier("metadataRowKeyDistributor")
-    private RowKeyDistributorByHashPrefix rowKeyDistributorByHashPrefix;
+    private final HbaseOperations hbaseTemplate;
+    private final TableNameProvider tableNameProvider;
+
+
+    private final RowKeyDistributorByHashPrefix rowKeyDistributorByHashPrefix;
+
+    private final RowKeyEncoder<MetaDataRowKey> rowKeyEncoder = new MetadataEncoder();
+
+    public HbaseStringMetaDataDao(HbaseOperations hbaseTemplate,
+                                  TableNameProvider tableNameProvider,
+                                  @Qualifier("metadataRowKeyDistributor") RowKeyDistributorByHashPrefix rowKeyDistributorByHashPrefix) {
+        this.hbaseTemplate = Objects.requireNonNull(hbaseTemplate, "hbaseTemplate");
+        this.tableNameProvider = Objects.requireNonNull(tableNameProvider, "tableNameProvider");
+        this.rowKeyDistributorByHashPrefix = Objects.requireNonNull(rowKeyDistributorByHashPrefix, "rowKeyDistributorByHashPrefix");
+    }
 
     @Override
     public void insert(StringMetaDataBo stringMetaData) {
-        if (stringMetaData == null) {
-            throw new NullPointerException("stringMetaData must not be null");
-        }
+        Objects.requireNonNull(stringMetaData, "stringMetaData");
         if (logger.isDebugEnabled()) {
             logger.debug("insert:{}", stringMetaData);
         }
 
-        final byte[] rowKey = getDistributedKey(stringMetaData.toRowKey());
-        final Put put = new Put(rowKey);
+        // Assert agentId
+        CollectorUtils.checkAgentId(stringMetaData.getAgentId());
+
+        final byte[] rowKey = getDistributedKey(rowKeyEncoder.encodeRowKey(stringMetaData));
+        final Put put = new Put(rowKey, true);
         final String stringValue = stringMetaData.getStringValue();
         final byte[] sqlBytes = Bytes.toBytes(stringValue);
-        put.addColumn(getColumnFamilyName(), getColumnFamily().QUALIFIER_STRING, sqlBytes);
+        put.addColumn(DESCRIPTOR.getName(), DESCRIPTOR.QUALIFIER_STRING, sqlBytes);
 
-        final TableName stringMetaDataTableName = getTableName();
+        final TableName stringMetaDataTableName = tableNameProvider.getTableName(DESCRIPTOR.getTable());
         hbaseTemplate.put(stringMetaDataTableName, put);
     }
 
@@ -70,9 +87,5 @@ public class HbaseStringMetaDataDao extends AbstractHbaseDao implements StringMe
         return rowKeyDistributorByHashPrefix.getDistributedKey(rowKey);
     }
 
-    @Override
-    public HbaseColumnFamily.StringMetadataStr getColumnFamily() {
-        return HbaseColumnFamily.STRING_METADATA_STR;
-    }
 
 }

@@ -17,68 +17,121 @@
 package com.navercorp.pinpoint.collector.dao.hbase;
 
 import com.navercorp.pinpoint.collector.dao.AgentInfoDao;
+import com.navercorp.pinpoint.collector.util.CollectorUtils;
 import com.navercorp.pinpoint.common.hbase.HbaseColumnFamily;
-import com.navercorp.pinpoint.common.hbase.HbaseOperations2;
-import com.navercorp.pinpoint.common.hbase.HbaseTableConstatns;
+import com.navercorp.pinpoint.common.hbase.HbaseOperations;
+import com.navercorp.pinpoint.common.hbase.ResultsExtractor;
+import com.navercorp.pinpoint.common.hbase.RowMapper;
+import com.navercorp.pinpoint.common.hbase.TableNameProvider;
 import com.navercorp.pinpoint.common.server.bo.AgentInfoBo;
+import com.navercorp.pinpoint.common.server.bo.serializer.agent.AgentIdRowKeyEncoder;
+import com.navercorp.pinpoint.common.server.dao.hbase.mapper.SingleResultsExtractor;
 import com.navercorp.pinpoint.common.server.util.RowKeyUtils;
-import com.navercorp.pinpoint.common.util.TimeUtils;
-
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Put;
-import org.apache.hadoop.hbase.util.Bytes;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.hadoop.hbase.client.Scan;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Repository;
+
+import java.util.Objects;
 
 /**
  * @author emeroad
+ * @author jaehong.kim
  */
 @Repository
-public class HbaseAgentInfoDao extends AbstractHbaseDao implements AgentInfoDao {
+public class HbaseAgentInfoDao implements AgentInfoDao {
+    private static final int SCANNER_CACHING = 1;
 
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
+    private static final HbaseColumnFamily.AgentInfo DESCRIPTOR = HbaseColumnFamily.AGENTINFO_INFO;
 
-    @Autowired
-    private HbaseOperations2 hbaseTemplate;
+    private final HbaseOperations hbaseTemplate;
+    private final TableNameProvider tableNameProvider;
+
+    private final ResultsExtractor<AgentInfoBo> agentInfoResultsExtractor;
+    private final AgentIdRowKeyEncoder rowKeyEncoder = new AgentIdRowKeyEncoder();
+
+    public HbaseAgentInfoDao(HbaseOperations hbaseTemplate,
+                             TableNameProvider tableNameProvider,
+                             RowMapper<AgentInfoBo> agentInfoMapper) {
+        this.hbaseTemplate = Objects.requireNonNull(hbaseTemplate, "hbaseTemplate");
+        this.tableNameProvider = Objects.requireNonNull(tableNameProvider, "tableNameProvider");
+
+        this.agentInfoResultsExtractor = new SingleResultsExtractor<>(agentInfoMapper);
+    }
 
     @Override
     public void insert(AgentInfoBo agentInfo) {
-        if (agentInfo == null) {
-            throw new NullPointerException("agentInfo must not be null");
-        }
-
+        Objects.requireNonNull(agentInfo, "agentInfo");
         if (logger.isDebugEnabled()) {
             logger.debug("insert agent info. {}", agentInfo);
         }
 
-        final byte[] agentId = Bytes.toBytes(agentInfo.getAgentId());
-        final long reverseKey = TimeUtils.reverseTimeMillis(agentInfo.getStartTime());
-        final byte[] rowKey = RowKeyUtils.concatFixedByteAndLong(agentId, HbaseTableConstatns.AGENT_NAME_MAX_LEN, reverseKey);
-        final Put put = new Put(rowKey);
+        // Assert agentId
+        CollectorUtils.checkAgentId(agentInfo.getAgentId());
+        // Assert applicationName
+        CollectorUtils.checkApplicationName(agentInfo.getApplicationName());
+        //check agentName if set
+        CollectorUtils.checkAgentName(agentInfo.getAgentName());
+
+        final byte[] rowKey = rowKeyEncoder.encodeRowKey(agentInfo.getAgentId(), agentInfo.getStartTime());
+        final Put put = new Put(rowKey, true);
 
         // should add additional agent informations. for now added only starttime for sqlMetaData
         final byte[] agentInfoBoValue = agentInfo.writeValue();
-        put.addColumn(getColumnFamilyName(), getColumnFamily().QUALIFIER_IDENTIFIER, agentInfoBoValue);
+        put.addColumn(DESCRIPTOR.getName(), DESCRIPTOR.QUALIFIER_IDENTIFIER, agentInfoBoValue);
 
         if (agentInfo.getServerMetaData() != null) {
             final byte[] serverMetaDataBoValue = agentInfo.getServerMetaData().writeValue();
-            put.addColumn(getColumnFamilyName(), getColumnFamily().QUALIFIER_SERVER_META_DATA, serverMetaDataBoValue);
+            put.addColumn(DESCRIPTOR.getName(), DESCRIPTOR.QUALIFIER_SERVER_META_DATA, serverMetaDataBoValue);
         }
 
         if (agentInfo.getJvmInfo() != null) {
             final byte[] jvmInfoBoValue = agentInfo.getJvmInfo().writeValue();
-            put.addColumn(getColumnFamilyName(), getColumnFamily().QUALIFIER_JVM, jvmInfoBoValue);
+            put.addColumn(DESCRIPTOR.getName(), DESCRIPTOR.QUALIFIER_JVM, jvmInfoBoValue);
         }
 
-        final TableName agentInfoTableName = getTableName();
+        final TableName agentInfoTableName = tableNameProvider.getTableName(DESCRIPTOR.getTable());
         hbaseTemplate.put(agentInfoTableName, put);
     }
 
-    @Override
-    public HbaseColumnFamily.AgentInfo getColumnFamily() {
-        return HbaseColumnFamily.AGENTINFO_INFO;
+    public AgentInfoBo getSimpleAgentInfo(final String agentId, final long timestamp) {
+        Objects.requireNonNull(agentId, "agentId");
+
+        final TableName agentInfoTableName = tableNameProvider.getTableName(DESCRIPTOR.getTable());
+        return getSimpleAgentInfoBoByScanner(agentId, timestamp, agentInfoTableName);
+//        return getAgentInfoBoByGet(agentId, timestamp, agentInfoTableName);
     }
 
+//    private AgentInfoBo getSimpleAgentInfoBoByGet(String agentId, long timestamp, TableName agentInfoTableName) {
+//        byte[] rowKey = rowKeyEncoder.encodeRowKey(agentId, timestamp);
+//        Get get = new Get(rowKey);
+//        get.addColumn(DESCRIPTOR.getName(), DESCRIPTOR.QUALIFIER_IDENTIFIER);
+//        return hbaseTemplate.get(agentInfoTableName, get, agentInfoMapper);
+//    }
+
+    private AgentInfoBo getSimpleAgentInfoBoByScanner(String agentId, long timestamp, TableName agentInfoTableName) {
+        final Scan scan = createScan(agentId, timestamp);
+        return this.hbaseTemplate.find(agentInfoTableName, scan, agentInfoResultsExtractor);
+    }
+
+    private Scan createScan(String agentId, long currentTime) {
+        final Scan scan = new Scan();
+
+        final byte[] startKeyBytes = rowKeyEncoder.encodeRowKey(agentId, currentTime);
+        final byte[] endKeyBytes = RowKeyUtils.agentIdAndTimestamp(agentId, Long.MAX_VALUE);
+
+        scan.withStartRow(startKeyBytes);
+        scan.withStopRow(endKeyBytes);
+
+        scan.readVersions(1);
+        scan.setOneRowLimit();
+        scan.setCaching(SCANNER_CACHING);
+
+        scan.addColumn(DESCRIPTOR.getName(), DESCRIPTOR.QUALIFIER_IDENTIFIER);
+
+        return scan;
+    }
 }

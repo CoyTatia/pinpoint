@@ -16,28 +16,42 @@
 
 package com.navercorp.pinpoint.web.mapper;
 
+import com.google.common.collect.Iterables;
 import com.navercorp.pinpoint.common.hbase.ResultsExtractor;
-import com.navercorp.pinpoint.web.vo.AgentInfo;
+import com.navercorp.pinpoint.common.hbase.RowMapper;
+import com.navercorp.pinpoint.common.server.bo.AgentInfoBo;
+import com.navercorp.pinpoint.loader.service.ServiceTypeRegistryService;
+import com.navercorp.pinpoint.web.vo.agent.AgentInfo;
+import com.navercorp.pinpoint.web.vo.agent.AgentInfoFactory;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+
+import java.util.Objects;
 
 /**
  * @author HyunGil Jeong
  */
 @Component
 public class AgentInfoResultsExtractor implements ResultsExtractor<AgentInfo> {
+    private final AgentInfoFactory factory;
+    private final RowMapper<AgentInfoBo> agentInfoMapper;
 
-    @Autowired
-    private AgentInfoMapper agentInfoMapper;
+    public AgentInfoResultsExtractor(ServiceTypeRegistryService registryService,
+                                     RowMapper<AgentInfoBo> agentInfoMapper) {
+        Objects.requireNonNull(registryService, "registryService");
+
+        this.factory = new AgentInfoFactory(registryService);
+        this.agentInfoMapper = Objects.requireNonNull(agentInfoMapper, "agentInfoMapper");
+    }
 
     @Override
     public AgentInfo extractData(ResultScanner results) throws Exception {
-        int found = 0;
-        for (Result result : results) {
-            return agentInfoMapper.mapRow(result, found++);
+        final Result first = Iterables.getFirst(results, null);
+        if (first == null) {
+            return null;
         }
-        return null;
+        AgentInfoBo agentInfoBo = agentInfoMapper.mapRow(first, 0);
+        return factory.build(agentInfoBo);
     }
 }

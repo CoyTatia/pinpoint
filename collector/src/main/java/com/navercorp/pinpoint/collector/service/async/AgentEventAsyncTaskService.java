@@ -19,9 +19,8 @@ package com.navercorp.pinpoint.collector.service.async;
 import com.navercorp.pinpoint.collector.service.AgentEventService;
 import com.navercorp.pinpoint.common.server.bo.event.AgentEventBo;
 import com.navercorp.pinpoint.common.server.util.AgentEventType;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -33,15 +32,18 @@ import java.util.Objects;
  */
 @Service
 public class AgentEventAsyncTaskService {
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
 
-    @Autowired
-    private AgentEventService agentEventService;
+    private final AgentEventService agentEventService;
+
+    public AgentEventAsyncTaskService(AgentEventService agentEventService) {
+        this.agentEventService = Objects.requireNonNull(agentEventService, "agentEventService");
+    }
 
     @Async("agentEventWorker")
     public void handleEvent(final AgentProperty agentProperty, long eventTimestamp, AgentEventType eventType) {
-        Objects.requireNonNull(agentProperty, "agentProperty must not be null");
-        Objects.requireNonNull(eventType, "eventType must not be null");
+        Objects.requireNonNull(agentProperty, "agentProperty");
+        Objects.requireNonNull(eventType, "eventType");
 
         final String agentId = agentProperty.getAgentId();
         final long startTimestamp = agentProperty.getStartTime();

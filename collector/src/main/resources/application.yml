@@ -1,0 +1,15 @@
+spring:
+  profiles:
+    active: release
+
+server:
+  port: 8081
+
+pinpoint:
+  modules:
+    collector:
+      grpc:
+        ssl:
+          enabled: false
+    realtime:
+      enabled: false

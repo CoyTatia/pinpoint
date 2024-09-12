@@ -16,8 +16,10 @@
 
 package com.navercorp.pinpoint.common.server.bo.grpc;
 
+import com.google.protobuf.ByteString;
 import com.google.protobuf.Descriptors;
 import com.navercorp.pinpoint.common.server.bo.AnnotationFactory;
+import com.navercorp.pinpoint.common.util.BytesStringStringValue;
 import com.navercorp.pinpoint.common.util.IntBooleanIntBooleanValue;
 import com.navercorp.pinpoint.common.util.IntStringStringValue;
 import com.navercorp.pinpoint.common.util.IntStringValue;
@@ -25,6 +27,7 @@ import com.navercorp.pinpoint.common.util.LongIntIntByteByteStringValue;
 import com.navercorp.pinpoint.common.util.StringStringValue;
 import com.navercorp.pinpoint.grpc.trace.PAnnotation;
 import com.navercorp.pinpoint.grpc.trace.PAnnotationValue;
+import com.navercorp.pinpoint.grpc.trace.PBytesStringStringValue;
 import com.navercorp.pinpoint.grpc.trace.PIntBooleanIntBooleanValue;
 import com.navercorp.pinpoint.grpc.trace.PIntStringStringValue;
 import com.navercorp.pinpoint.grpc.trace.PIntStringValue;
@@ -57,7 +60,9 @@ public class GrpcAnnotationHandler implements AnnotationFactory.AnnotationTypeHa
 
     @Override
     public Object buildCustomAnnotationValue(Object annotationValue) {
-        if (annotationValue instanceof PIntStringValue) {
+        if (annotationValue instanceof ByteString byteString) {
+            return byteString.toByteArray();
+        } else if (annotationValue instanceof PIntStringValue) {
             return newIntStringValue(annotationValue);
         } else if (annotationValue instanceof PIntStringStringValue) {
             return newIntStringString(annotationValue);
@@ -67,35 +72,76 @@ public class GrpcAnnotationHandler implements AnnotationFactory.AnnotationTypeHa
             return newLongIntIntByteByteStringValue(annotationValue);
         } else if (annotationValue instanceof PIntBooleanIntBooleanValue) {
             return newIntBooleanIntBooleanValue(annotationValue);
+        } else if (annotationValue instanceof PBytesStringStringValue) {
+            return newBytesStringString(annotationValue);
         }
         return null;
     }
 
 
     private IntStringValue newIntStringValue(Object annotationValue) {
-        PIntStringValue tValue = (PIntStringValue) annotationValue;
-        return new IntStringValue(tValue.getIntValue(), tValue.getStringValue());
+        final PIntStringValue pValue = (PIntStringValue) annotationValue;
+        String stringValue = null;
+        if (pValue.hasStringValue()) {
+            stringValue = pValue.getStringValue().getValue();
+        }
+        return new IntStringValue(pValue.getIntValue(), stringValue);
     }
 
     private IntStringStringValue newIntStringString(Object annotationValue) {
-        PIntStringStringValue tValue = (PIntStringStringValue) annotationValue;
-        return new IntStringStringValue(tValue.getIntValue(), tValue.getStringValue1(), tValue.getStringValue2());
+        final PIntStringStringValue pValue = (PIntStringStringValue) annotationValue;
+        String stringValue1 = null;
+        if (pValue.hasStringValue1()) {
+            stringValue1 = pValue.getStringValue1().getValue();
+        }
+        String stringValue2 = null;
+        if (pValue.hasStringValue2()) {
+            stringValue2 = pValue.getStringValue2().getValue();
+        }
+        return new IntStringStringValue(pValue.getIntValue(), stringValue1, stringValue2);
+    }
+
+    private BytesStringStringValue newBytesStringString(Object annotationValue) {
+        final PBytesStringStringValue pValue = (PBytesStringStringValue) annotationValue;
+        String stringValue1 = null;
+        if (pValue.hasStringValue1()) {
+            stringValue1 = pValue.getStringValue1().getValue();
+        }
+        String stringValue2 = null;
+        if (pValue.hasStringValue2()) {
+            stringValue2 = pValue.getStringValue2().getValue();
+        }
+        return new BytesStringStringValue(pValue.getBytesValue().toByteArray(), stringValue1, stringValue2);
     }
 
     private StringStringValue newStringStringValue(Object annotationValue) {
-        PStringStringValue tValue = (PStringStringValue) annotationValue;
-        return new StringStringValue(tValue.getStringValue1(), tValue.getStringValue2());
+        final PStringStringValue pValue = (PStringStringValue) annotationValue;
+
+        String stringValue1 = null;
+        if (pValue.hasStringValue1()) {
+            stringValue1 = pValue.getStringValue1().getValue();
+        }
+
+        String stringValue2 = null;
+        if (pValue.hasStringValue2()) {
+            stringValue2 = pValue.getStringValue2().getValue();
+        }
+        return new StringStringValue(stringValue1, stringValue2);
     }
 
     private IntBooleanIntBooleanValue newIntBooleanIntBooleanValue(Object annotationValue) {
-        PIntBooleanIntBooleanValue tValue = (PIntBooleanIntBooleanValue) annotationValue;
-        return new IntBooleanIntBooleanValue(tValue.getIntValue1(), tValue.getBoolValue1(),
-                tValue.getIntValue2(), tValue.getBoolValue2());
+        final PIntBooleanIntBooleanValue pValue = (PIntBooleanIntBooleanValue) annotationValue;
+        return new IntBooleanIntBooleanValue(pValue.getIntValue1(), pValue.getBoolValue1(),
+                pValue.getIntValue2(), pValue.getBoolValue2());
     }
 
     private LongIntIntByteByteStringValue newLongIntIntByteByteStringValue(Object annotationValue) {
-        PLongIntIntByteByteStringValue tValue = (PLongIntIntByteByteStringValue) annotationValue;
-        return new LongIntIntByteByteStringValue(tValue.getLongValue(), tValue.getIntValue1(), tValue.getIntValue2(),
-                (byte)tValue.getByteValue1(), (byte)tValue.getByteValue2(), tValue.getStringValue());
+        final PLongIntIntByteByteStringValue pValue = (PLongIntIntByteByteStringValue) annotationValue;
+        String stringValue = null;
+        if (pValue.hasStringValue()) {
+            stringValue = pValue.getStringValue().getValue();
+        }
+        return new LongIntIntByteByteStringValue(pValue.getLongValue(), pValue.getIntValue1(), pValue.getIntValue2(),
+                (byte)pValue.getByteValue1(), (byte)pValue.getByteValue2(), stringValue);
     }
 }

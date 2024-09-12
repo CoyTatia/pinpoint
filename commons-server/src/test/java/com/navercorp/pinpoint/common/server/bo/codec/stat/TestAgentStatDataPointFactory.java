@@ -16,7 +16,6 @@
 
 package com.navercorp.pinpoint.common.server.bo.codec.stat;
 
-import org.apache.commons.lang3.RandomUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,15 +41,15 @@ public interface TestAgentStatDataPointFactory<T extends Number> {
     List<T> createFluctuatingValues(T minValue, T maxValue, T minFluctuation, T maxFluctuation);
     List<T> createFluctuatingValues(T minValue, T maxValue, T minFluctuation, T maxFluctuation, int numValues);
 
-    TestAgentStatDataPointFactory<Short> SHORT = new TestAgentStatDataPointFactoryImpl<Short>() {
+    TestAgentStatDataPointFactory<Short> SHORT = new TestAgentStatDataPointFactoryImpl<>() {
         @Override
         protected Short add(Short a, Short b) {
-            return (short) (a.shortValue() + b.shortValue());
+            return (short) (a + b);
         }
 
         @Override
         protected Short diff(Short a, Short b) {
-            return (short) (a.shortValue() - b.shortValue());
+            return (short) (a - b);
         }
 
         @Override
@@ -71,21 +70,21 @@ public interface TestAgentStatDataPointFactory<T extends Number> {
                 }
             } else {
                 int value = RANDOM.nextInt(max - min);
-                value -= min;
+                value += min;
                 return (short) value;
             }
         }
     };
 
-    TestAgentStatDataPointFactory<Integer> INTEGER = new TestAgentStatDataPointFactoryImpl<Integer>() {
+    TestAgentStatDataPointFactory<Integer> INTEGER = new TestAgentStatDataPointFactoryImpl<>() {
         @Override
         protected Integer add(Integer a, Integer b) {
-            return a.intValue() + b.intValue();
+            return a + b;
         }
 
         @Override
         protected Integer diff(Integer a, Integer b) {
-            return a.intValue() - b.intValue();
+            return a - b;
         }
 
         @Override
@@ -106,22 +105,22 @@ public interface TestAgentStatDataPointFactory<T extends Number> {
                 }
             } else {
                 int value = RANDOM.nextInt(max - min);
-                value -= min;
+                value += min;
                 return value;
             }
         }
     };
 
-    TestAgentStatDataPointFactory<Long> LONG = new TestAgentStatDataPointFactoryImpl<Long>() {
+    TestAgentStatDataPointFactory<Long> LONG = new TestAgentStatDataPointFactoryImpl<>() {
 
         @Override
         protected Long add(Long a, Long b) {
-            return a.longValue() + b.longValue();
+            return a + b;
         }
 
         @Override
         protected Long diff(Long a, Long b) {
-            return a.longValue() - b.longValue();
+            return a - b;
         }
 
         @Override
@@ -161,14 +160,14 @@ public interface TestAgentStatDataPointFactory<T extends Number> {
 
         @Override
         public List<T> createConstantValues(T minValue, T maxValue) {
-            final int numValues = RandomUtils.nextInt(1, MAX_NUM_TEST_VALUES);
+            final int numValues = RANDOM.nextInt(1, MAX_NUM_TEST_VALUES);
             return this.createConstantValues(minValue, maxValue, numValues);
         }
 
         @Override
         public List<T> createConstantValues(T minValue, T maxValue, int numValues) {
             T value = this.createValue(minValue, maxValue);
-            List<T> values = new ArrayList<T>(numValues);
+            List<T> values = new ArrayList<>(numValues);
             for (int i = 0; i < numValues; i++) {
                 values.add(value);
             }
@@ -177,13 +176,13 @@ public interface TestAgentStatDataPointFactory<T extends Number> {
 
         @Override
         public List<T> createRandomValues(T minValue, T maxValue) {
-            final int numValues = RandomUtils.nextInt(1, MAX_NUM_TEST_VALUES);
+            final int numValues = RANDOM.nextInt(1, MAX_NUM_TEST_VALUES);
             return this.createRandomValues(minValue, maxValue, numValues);
         }
 
         @Override
         public List<T> createRandomValues(T minValue, T maxValue, int numValues) {
-            List<T> values = new ArrayList<T>(numValues);
+            List<T> values = new ArrayList<>(numValues);
             for (int i = 0; i < numValues; i++) {
                 T value = this.createValue(minValue, maxValue);
                 values.add(value);
@@ -193,13 +192,13 @@ public interface TestAgentStatDataPointFactory<T extends Number> {
 
         @Override
         public List<T> createIncreasingValues(T minValue, T maxValue, T minIncrement, T maxIncrement) {
-            final int numValues = RandomUtils.nextInt(1, MAX_NUM_TEST_VALUES);
+            final int numValues = RANDOM.nextInt(1, MAX_NUM_TEST_VALUES);
             return this.createIncreasingValues(minValue, maxValue, minIncrement, maxIncrement, numValues);
         }
 
         @Override
         public List<T> createIncreasingValues(T minValue, T maxValue, T minIncrement, T maxIncrement, int numValues) {
-            List<T> values = new ArrayList<T>(numValues);
+            List<T> values = new ArrayList<>(numValues);
             T value = this.createValue(minValue, maxValue);
             values.add(value);
             for (int i = 0; i < numValues - 1; i++) {
@@ -212,13 +211,13 @@ public interface TestAgentStatDataPointFactory<T extends Number> {
 
         @Override
         public List<T> createDecreasingValues(T minValue, T maxValue, T minDecrement, T maxDecrement) {
-            final int numValues = RandomUtils.nextInt(1, MAX_NUM_TEST_VALUES);
+            final int numValues = RANDOM.nextInt(1, MAX_NUM_TEST_VALUES);
             return this.createDecreasingValues(minValue, maxValue, minDecrement, maxDecrement, numValues);
         }
 
         @Override
         public List<T> createDecreasingValues(T minValue, T maxValue, T minDecrement, T maxDecrement, int numValues) {
-            List<T> values = new ArrayList<T>(numValues);
+            List<T> values = new ArrayList<>(numValues);
             T value = this.createValue(minValue, maxValue);
             values.add(value);
             for (int i = 0; i < numValues - 1; i++) {
@@ -231,19 +230,19 @@ public interface TestAgentStatDataPointFactory<T extends Number> {
 
         @Override
         public List<T> createFluctuatingValues(T minValue, T maxValue, T minFluctuation, T maxFluctuation) {
-            final int numValues = RandomUtils.nextInt(1, MAX_NUM_TEST_VALUES);
+            final int numValues = RANDOM.nextInt(1, MAX_NUM_TEST_VALUES);
             return this.createFluctuatingValues(minValue, maxValue, minFluctuation, maxFluctuation, numValues);
         }
 
         @Override
         public List<T> createFluctuatingValues(T minValue, T maxValue, T minFluctuation, T maxFluctuation, int numValues) {
-            List<T> values = new ArrayList<T>(numValues);
+            List<T> values = new ArrayList<>(numValues);
             T value = this.createValue(minValue, maxValue);
             values.add(value);
             boolean sign = RANDOM.nextBoolean();
             for (int i = 0; i < numValues - 1; i++) {
                 T fluctuation = this.createValue(minFluctuation, maxFluctuation);
-                // randomly add or substract fluctuation
+                // randomly add or subtract fluctuation
                 if (sign) {
                     value = add(value, fluctuation);
                 } else {

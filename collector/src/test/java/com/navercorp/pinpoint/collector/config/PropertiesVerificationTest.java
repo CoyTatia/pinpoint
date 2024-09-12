@@ -17,58 +17,38 @@
 package com.navercorp.pinpoint.collector.config;
 
 import com.navercorp.pinpoint.common.util.PropertyUtils;
-import com.navercorp.pinpoint.common.util.StringUtils;
-import org.junit.Assert;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.Properties;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * @author Taejin Koo
  */
 public class PropertiesVerificationTest {
 
+    private static final String LOCAL_HOST = "localhost";
+    private static final String HBASE_CLIENT_HOST_VALUE = "${pinpoint.zookeeper.address}";
+
     @Test
     public void checkHbasePropertiesTest() throws Exception {
-        Properties properties = PropertyUtils.loadPropertyFromClassPath("hbase.properties");
+        Properties properties = PropertyUtils.loadPropertyFromClassPath("profiles/release/hbase.properties");
 
         String clientHost = properties.getProperty("hbase.client.host");
-        Assert.assertEquals("localhost", clientHost);
+        assertEquals(HBASE_CLIENT_HOST_VALUE, clientHost);
 
         String clientPort = properties.getProperty("hbase.client.port");
-        Assert.assertEquals("2181", clientPort);
+        assertEquals("2181", clientPort);
     }
 
     @Test
     public void checkCollectionPropertiesTest() throws Exception {
-        Properties properties = PropertyUtils.loadPropertyFromClassPath("pinpoint-collector.properties");
+        Properties properties = PropertyUtils.loadPropertyFromClassPath("pinpoint-collector-root.properties");
 
-        String receiverIp = properties.getProperty("collector.receiver.base.ip");
-        Assert.assertEquals("0.0.0.0", receiverIp);
+        String receiverIp = properties.getProperty("pinpoint.zookeeper.address");
+        assertEquals("localhost", receiverIp);
 
-        receiverIp = properties.getProperty("collector.receiver.stat.udp.ip");
-        Assert.assertEquals("0.0.0.0", receiverIp);
-
-        receiverIp = properties.getProperty("collector.receiver.stat.tcp.ip");
-        Assert.assertEquals("0.0.0.0", receiverIp);
-
-        receiverIp = properties.getProperty("collector.receiver.span.udp.ip");
-        Assert.assertEquals("0.0.0.0", receiverIp);
-
-        receiverIp = properties.getProperty("collector.receiver.span.tcp.ip");
-        Assert.assertEquals("0.0.0.0", receiverIp);
-
-        String l4Ip = properties.getProperty("collector.l4.ip");
-        Assert.assertTrue(StringUtils.isEmpty(l4Ip));
-
-        String zookeeperAddress = properties.getProperty("cluster.zookeeper.address");
-        Assert.assertEquals("localhost", zookeeperAddress);
-
-        zookeeperAddress = properties.getProperty("flink.cluster.zookeeper.address");
-        Assert.assertEquals("localhost", zookeeperAddress);
-
-        String clusterListenIp = properties.getProperty("cluster.listen.ip");
-        Assert.assertTrue(StringUtils.isEmpty(clusterListenIp));
     }
 
 }

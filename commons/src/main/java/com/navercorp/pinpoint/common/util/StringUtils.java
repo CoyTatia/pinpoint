@@ -37,12 +37,16 @@ public final class StringUtils {
         return str == null ? defaultStr : str;
     }
 
+    public static String defaultIfEmpty(final String str, final String defaultStr) {
+        return isEmpty(str) ? defaultStr : str;
+    }
+
     public static boolean isEmpty(final String string) {
         return string == null || string.isEmpty();
     }
 
     public static boolean hasLength(final String string) {
-        return string != null && string.length() > 0;
+        return string != null && !string.isEmpty();
     }
 
     public static boolean hasText(String string) {
@@ -59,11 +63,11 @@ public final class StringUtils {
         return false;
     }
 
-    public static <T> int getLength(final String string) {
+    public static int getLength(final String string) {
         return getLength(string, 0);
     }
 
-    public static <T> int getLength(final String string, final int nullValue) {
+    public static int getLength(final String string, final int nullValue) {
         if (string == null) {
             return nullValue;
         }
@@ -75,6 +79,14 @@ public final class StringUtils {
             return NULL_STRING;
         }
         return object.toString();
+    }
+
+    public static boolean startWith(String str, String prefix) {
+        return str != null && str.startsWith(prefix);
+    }
+
+    public static boolean contains(String str, String prefix) {
+        return str != null && str.contains(prefix);
     }
 
 
@@ -91,13 +103,17 @@ public final class StringUtils {
             throw new IllegalArgumentException("negative maxWidth:" + maxWidth);
         }
         if (str.length() > maxWidth) {
-            StringBuilder buffer = new StringBuilder(maxWidth + 10);
+            StringBuilder buffer = new StringBuilder(abbreviateBufferSize(maxWidth, str.length()));
             buffer.append(str, 0, maxWidth);
             appendAbbreviateMessage(buffer, str.length());
             return buffer.toString();
         } else {
             return str;
         }
+    }
+
+    static int abbreviateBufferSize(int maxWidth, int strLength) {
+        return maxWidth + "...()".length() + stringLength(strLength);
     }
 
     public static void appendAbbreviate(final StringBuilder builder, final String str, final int maxWidth) {
@@ -121,6 +137,16 @@ public final class StringUtils {
         buffer.append(')');
     }
 
+
+    final static int[] INT_TABLE = {9, 99, 999, 9999, 99999, 999999, 9999999, 99999999, 999999999, Integer.MAX_VALUE};
+
+    static int stringLength(int x) {
+        for (int i = 0; ; i++) {
+            if (x <= INT_TABLE[i]) {
+                return i + 1;
+            }
+        }
+    }
 
     /**
      * Copy Spring Framework StringUtils
@@ -165,13 +191,13 @@ public final class StringUtils {
             return Collections.emptyList();
         }
         StringTokenizer st = new StringTokenizer(str, delimiters);
-        List<String> tokens = new ArrayList<String>();
+        List<String> tokens = new ArrayList<>();
         while (st.hasMoreTokens()) {
             String token = st.nextToken();
             if (trimTokens) {
                 token = token.trim();
             }
-            if (!ignoreEmptyTokens || token.length() > 0) {
+            if (!ignoreEmptyTokens || !token.isEmpty()) {
                 tokens.add(token);
             }
         }
@@ -248,11 +274,11 @@ public final class StringUtils {
         }
         int replLength = searchString.length();
         int increase = replacement.length() - replLength;
-        increase = increase < 0 ? 0 : increase;
-        increase *= max < 0 ? 16 : max > 64 ? 64 : max;
+        increase = Math.max(increase, 0);
+        increase *= max < 0 ? 16 : Math.min(max, 64);
         StringBuilder buf = new StringBuilder(text.length() + increase);
         while (end != INDEX_NOT_FOUND) {
-            buf.append(text.substring(start, end)).append(replacement);
+            buf.append(text, start, end).append(replacement);
             start = end + replLength;
             if (--max == 0) {
                 break;

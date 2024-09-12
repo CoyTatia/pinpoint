@@ -24,11 +24,6 @@ import com.navercorp.pinpoint.io.util.TypeLocator;
 import com.navercorp.pinpoint.io.util.TypeLocatorBuilder;
 import com.navercorp.pinpoint.thrift.dto.flink.TFAgentStatBatch;
 import org.apache.thrift.TBase;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.Collections;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author minwoo.jung
@@ -50,7 +45,7 @@ public class FlinkTBaseLocator {
 
     private TypeLocator<TBase<?, ?>> newTypeLocator() {
         HeaderFactory headerFactory = new FlinkHeaderFactory();
-        TypeLocatorBuilder<TBase<?, ?>> typeLocatorBuilder = new TypeLocatorBuilder<TBase<?, ?>>(headerFactory);
+        TypeLocatorBuilder<TBase<?, ?>> typeLocatorBuilder = new TypeLocatorBuilder<>(headerFactory);
         typeLocatorBuilder.addBodyFactory(AGENT_STAT_BATCH, new BodyFactory<TBase<?, ?>>() {
             @Override
             public TBase<?, ?> getObject() {

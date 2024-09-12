@@ -1,11 +1,11 @@
 /*
- * Copyright 2014 NAVER Corp.
+ * Copyright 2019 NAVER Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,15 +16,15 @@
 
 package com.navercorp.pinpoint.web.calltree.span;
 
-import java.util.List;
-import java.util.Objects;
-
 import com.navercorp.pinpoint.common.server.bo.AnnotationBo;
 import com.navercorp.pinpoint.common.server.bo.SpanBo;
 import com.navercorp.pinpoint.common.server.bo.SpanChunkBo;
 import com.navercorp.pinpoint.common.server.bo.SpanEventBo;
-import com.navercorp.pinpoint.common.util.TransactionIdUtils;
-import org.apache.commons.collections.CollectionUtils;
+import com.navercorp.pinpoint.common.util.StringUtils;
+import org.apache.commons.collections4.CollectionUtils;
+
+import java.util.List;
+import java.util.Objects;
 
 /**
  * @author emeroad
@@ -45,13 +45,13 @@ public class SpanAlign implements Align {
     }
 
     public SpanAlign(SpanBo spanBo, boolean meta) {
-        this.spanBo = Objects.requireNonNull(spanBo, "spanBo must not be null");
-        this.hasChild = hasChild0();
+        this.spanBo = Objects.requireNonNull(spanBo, "spanBo");
+        this.hasChild = hasChild0(spanBo);
         this.meta = meta;
     }
 
-    private boolean hasChild0() {
-        final List<SpanEventBo> spanEvents = this.spanBo.getSpanEventBoList();
+    private boolean hasChild0(SpanBo spanBo) {
+        final List<SpanEventBo> spanEvents = spanBo.getSpanEventBoList();
         if (CollectionUtils.isNotEmpty(spanEvents)) {
             return true;
         }
@@ -175,11 +175,27 @@ public class SpanAlign implements Align {
     }
 
     @Override
+    public String getAgentName() {
+        final String def = " ";
+        if (isMeta()) {
+            return def;
+        }
+
+        final String agentName = spanBo.getAgentName();
+        return StringUtils.isEmpty(agentName) ? def : agentName;
+    }
+
+    @Override
     public String getApplicationId() {
         if (isMeta()) {
             return " ";
         }
         return spanBo.getApplicationId();
+    }
+
+    @Override
+    public Short getApplicationServiceType() {
+        return spanBo.getApplicationServiceType();
     }
 
     @Override
@@ -194,7 +210,7 @@ public class SpanAlign implements Align {
 
     @Override
     public String getTransactionId() {
-        return TransactionIdUtils.formatString(spanBo.getTransactionId());
+        return spanBo.getTransactionId().toString();
     }
 
     @Override
@@ -265,7 +281,7 @@ public class SpanAlign implements Align {
     @Override
     public String toString() {
         return "SpanAlign{" +
-                "spanBo=" + spanBo +
+                "spanBo=" + spanBo.getSpanId() +
                 ", hasChild=" + hasChild +
                 ", meta=" + meta +
                 ", id=" + id +
@@ -273,5 +289,57 @@ public class SpanAlign implements Align {
                 ", depth=" + depth +
                 ", executionMilliseconds=" + executionMilliseconds +
                 '}';
+    }
+
+    public static class Builder {
+        private final SpanBo spanBo;
+        private boolean meta;
+        private int id;
+        private long gap;
+        private int depth;
+        private long executionMilliseconds;
+
+        public Builder(SpanBo spanBo) {
+            this.spanBo = spanBo;
+        }
+
+        public Builder enableMeta() {
+            this.meta = true;
+            return this;
+        }
+
+        public Builder disableMeta() {
+            this.meta = false;
+            return this;
+        }
+
+        public Builder setId(int id) {
+            this.id = id;
+            return this;
+        }
+
+        public Builder setGap(long gap) {
+            this.gap = gap;
+            return this;
+        }
+
+        public Builder setDepth(int depth) {
+            this.depth = depth;
+            return this;
+        }
+
+        public Builder setExecutionMilliseconds(long executionMilliseconds) {
+            this.executionMilliseconds = executionMilliseconds;
+            return this;
+        }
+
+        public SpanAlign build() {
+            SpanAlign align = new SpanAlign(this.spanBo, meta);
+            align.setId(this.id);
+            align.setGap(this.gap);
+            align.setDepth(this.depth);
+            align.setExecutionMilliseconds(this.executionMilliseconds);
+            return align;
+        }
     }
 }

@@ -20,8 +20,8 @@ import com.navercorp.pinpoint.common.annotations.VisibleForTesting;
 import com.navercorp.pinpoint.common.hbase.namespace.HbaseNamespaceValidator;
 import com.navercorp.pinpoint.common.hbase.namespace.NamespaceValidator;
 import com.navercorp.pinpoint.common.hbase.util.HbaseTableNameCache;
-import com.navercorp.pinpoint.common.util.StringUtils;
 import org.apache.hadoop.hbase.TableName;
+import org.springframework.util.Assert;
 
 import java.util.Objects;
 
@@ -40,14 +40,12 @@ public class HbaseTableNameProvider implements TableNameProvider {
 
     @VisibleForTesting
     HbaseTableNameProvider(String namespace, NamespaceValidator namespaceValidator) {
-        Objects.requireNonNull(namespaceValidator, "namespaceValidator must not be null");
+        Objects.requireNonNull(namespaceValidator, "namespaceValidator");
         this.namespace = requireValidation(namespace, namespaceValidator);
     }
 
     private String requireValidation(String namespace, NamespaceValidator namespaceValidator) {
-        if (StringUtils.isEmpty(namespace)) {
-            throw new IllegalArgumentException("Namespace must not be empty");
-        }
+        Assert.hasLength(namespace, "namespace must not be empty");
         if (!namespaceValidator.validate(namespace)) {
             throw new IllegalArgumentException("Invalid namespace : " + namespace);
         }

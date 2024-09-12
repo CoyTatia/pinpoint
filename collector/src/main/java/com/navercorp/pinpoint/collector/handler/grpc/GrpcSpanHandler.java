@@ -16,22 +16,33 @@
 
 package com.navercorp.pinpoint.collector.handler.grpc;
 
+import com.google.protobuf.GeneratedMessageV3;
 import com.navercorp.pinpoint.collector.handler.SimpleHandler;
+import com.navercorp.pinpoint.collector.sampler.Sampler;
+import com.navercorp.pinpoint.collector.sampler.SpanSamplerFactory;
 import com.navercorp.pinpoint.collector.service.TraceService;
+import com.navercorp.pinpoint.common.hbase.RequestNotPermittedException;
+import com.navercorp.pinpoint.common.profiler.logging.LogSampler;
+import com.navercorp.pinpoint.common.server.bo.BasicSpan;
 import com.navercorp.pinpoint.common.server.bo.SpanBo;
+import com.navercorp.pinpoint.common.server.bo.grpc.BindAttribute;
 import com.navercorp.pinpoint.common.server.bo.grpc.GrpcSpanFactory;
-import com.navercorp.pinpoint.grpc.AgentHeaderFactory;
+import com.navercorp.pinpoint.common.server.util.AcceptedTimeService;
+import com.navercorp.pinpoint.common.util.CollectionUtils;
 import com.navercorp.pinpoint.grpc.Header;
 import com.navercorp.pinpoint.grpc.MessageFormatUtils;
 import com.navercorp.pinpoint.grpc.server.ServerContext;
 import com.navercorp.pinpoint.grpc.trace.PSpan;
+import com.navercorp.pinpoint.grpc.trace.PSpanEvent;
+import com.navercorp.pinpoint.grpc.trace.PTransactionId;
 import com.navercorp.pinpoint.io.request.ServerRequest;
 import io.grpc.Status;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Service;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -39,26 +50,35 @@ import java.util.Objects;
  * @author netspider
  */
 @Service
-public class GrpcSpanHandler implements SimpleHandler {
+public class GrpcSpanHandler implements SimpleHandler<GeneratedMessageV3> {
 
-    private final Logger logger = LoggerFactory.getLogger(getClass());
+    private final Logger logger = LogManager.getLogger(getClass());
+    private final LogSampler infoLog = new LogSampler(1000);
+    private final LogSampler warnLog = new LogSampler(100);
     private final boolean isDebug = logger.isDebugEnabled();
 
-    private TraceService traceService;
+    private final TraceService[] traceServices;
 
-    private GrpcSpanFactory spanFactory;
+    private final GrpcSpanFactory spanFactory;
 
-    @Autowired
-    public GrpcSpanHandler(TraceService traceService, GrpcSpanFactory spanFactory) {
-        this.traceService = Objects.requireNonNull(traceService, "traceService must not be null");
-        this.spanFactory = Objects.requireNonNull(spanFactory, "spanFactory must not be null");
+    private final AcceptedTimeService acceptedTimeService;
+
+    private final Sampler<BasicSpan> sampler;
+
+    public GrpcSpanHandler(TraceService[] traceServices, GrpcSpanFactory spanFactory, AcceptedTimeService acceptedTimeService, SpanSamplerFactory spanSamplerFactory) {
+        this.traceServices = Objects.requireNonNull(traceServices, "traceServices");
+        this.spanFactory = Objects.requireNonNull(spanFactory, "spanFactory");
+        this.acceptedTimeService = Objects.requireNonNull(acceptedTimeService, "acceptedTimeService");
+        this.sampler = spanSamplerFactory.createBasicSpanSampler();
+
+        logger.info("TraceServices {}", Arrays.toString(traceServices));
     }
 
     @Override
-    public void handleSimple(ServerRequest serverRequest) {
-        final Object data = serverRequest.getData();
-        if (data instanceof PSpan) {
-            handleSpan((PSpan) data);
+    public void handleSimple(ServerRequest<GeneratedMessageV3> serverRequest) {
+        final GeneratedMessageV3 data = serverRequest.getData();
+        if (data instanceof PSpan span) {
+            handleSpan(span);
         } else {
             logger.warn("Invalid request type. serverRequest={}", serverRequest);
             throw Status.INTERNAL.withDescription("Bad Request(invalid request type)").asRuntimeException();
@@ -67,15 +87,60 @@ public class GrpcSpanHandler implements SimpleHandler {
 
     private void handleSpan(PSpan span) {
         if (isDebug) {
-            logger.debug("Handle PSpan={}", MessageFormatUtils.debugLog(span));
+            logger.debug("Handle PSpan={}", createSimpleSpanLog(span));
         }
 
-        try {
-            Header agentInfo = ServerContext.getAgentInfo();
-            final SpanBo spanBo = spanFactory.buildSpanBo(span, agentInfo);
-            traceService.insertSpan(spanBo);
-        } catch (Exception e) {
-            logger.warn("Failed to handle span={}", MessageFormatUtils.debugLog(span), e);
+        final Header header = ServerContext.getAgentInfo();
+        final BindAttribute attribute = BindAttribute.of(header, acceptedTimeService.getAcceptedTime());
+        final SpanBo spanBo = spanFactory.buildSpanBo(span, attribute);
+        if (!sampler.isSampling(spanBo)) {
+            if (isDebug) {
+                logger.debug("unsampled PSpan={}", createSimpleSpanLog(span));
+            } else {
+                infoLog.log(() -> {
+                    if (logger.isInfoEnabled()) {
+                        logger.info("unsampled PSpan={}", createSimpleSpanLog(span));
+                    }
+                });
+            }
+            return;
+        }
+        for (TraceService traceService : traceServices) {
+            try {
+                traceService.insertSpan(spanBo);
+            } catch (RequestNotPermittedException notPermitted) {
+                warnLog.log((c) -> logger.warn("Failed to handle Span RequestNotPermitted:{} {}", notPermitted.getMessage(), c));
+            } catch (Throwable e) {
+                logger.warn("Failed to handle Span={}", MessageFormatUtils.debugLog(span), e);
+            }
         }
     }
+
+    private String createSimpleSpanLog(PSpan span) {
+        if (!isDebug) {
+            return "";
+        }
+
+        StringBuilder log = new StringBuilder(64);
+
+        PTransactionId transactionId = span.getTransactionId();
+        log.append(" transactionId:");
+        log.append(MessageFormatUtils.debugLog(transactionId));
+
+        log.append(" spanId:").append(span.getSpanId());
+
+        final List<PSpanEvent> spanEventList = span.getSpanEventList();
+        if (CollectionUtils.hasLength(spanEventList)) {
+            log.append(" spanEventSequence:");
+            for (PSpanEvent pSpanEvent : spanEventList) {
+                if (pSpanEvent == null) {
+                    continue;
+                }
+                log.append(pSpanEvent.getSequence()).append(" ");
+            }
+        }
+
+        return log.toString();
+    }
+
 }

@@ -17,12 +17,11 @@
 package com.navercorp.pinpoint.collector.dao.hbase.statistics;
 
 import com.navercorp.pinpoint.common.hbase.HbaseColumnFamily;
-
 import com.sematext.hbase.wd.RowKeyDistributorByHashPrefix;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Increment;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -30,13 +29,14 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * @author emeroad
  * @author HyunGil Jeong
  */
 public class RowKeyMerge {
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
     private final byte[] family;
 
     public RowKeyMerge(HbaseColumnFamily columnFamily) {
@@ -44,9 +44,8 @@ public class RowKeyMerge {
     }
 
     public RowKeyMerge(byte[] family) {
-        if (family == null) {
-            throw new NullPointerException("family must not be null");
-        }
+        Objects.requireNonNull(family, "family");
+
         this.family = Arrays.copyOf(family, family.length);
     }
 
@@ -64,6 +63,8 @@ public class RowKeyMerge {
             for (Map.Entry<RowKey, List<ColumnName>> rowKeyEntry : tableRowKeys.getValue().entrySet()) {
                 Increment increment = createIncrement(rowKeyEntry, rowKeyDistributorByHashPrefix);
                 incrementList.add(increment);
+
+
             }
             tableIncrementMap.put(tableName, incrementList);
         }
@@ -72,18 +73,24 @@ public class RowKeyMerge {
 
     private Increment createIncrement(Map.Entry<RowKey, List<ColumnName>> rowKeyEntry, RowKeyDistributorByHashPrefix rowKeyDistributorByHashPrefix) {
         RowKey rowKey = rowKeyEntry.getKey();
-        byte[] key = null;
-        if (rowKeyDistributorByHashPrefix == null) {
-            key = rowKey.getRowKey();
-        } else {
-            key = rowKeyDistributorByHashPrefix.getDistributedKey(rowKey.getRowKey());
-        }
+        byte[] key = getRowKey(rowKey, rowKeyDistributorByHashPrefix);
         final Increment increment = new Increment(key);
+        increment.setReturnResults(false);
         for (ColumnName columnName : rowKeyEntry.getValue()) {
             increment.addColumn(family, columnName.getColumnName(), columnName.getCallCount());
         }
+
+
         logger.trace("create increment row:{}, column:{}", rowKey, rowKeyEntry.getValue());
         return increment;
+    }
+
+    private byte[] getRowKey(RowKey rowKey, RowKeyDistributorByHashPrefix rowKeyDistributorByHashPrefix) {
+        if (rowKeyDistributorByHashPrefix == null) {
+            return rowKey.getRowKey();
+        } else {
+            return rowKeyDistributorByHashPrefix.getDistributedKey(rowKey.getRowKey());
+        }
     }
 
     private Map<TableName, Map<RowKey, List<ColumnName>>> mergeRowKeys(Map<RowInfo, Long> data) {

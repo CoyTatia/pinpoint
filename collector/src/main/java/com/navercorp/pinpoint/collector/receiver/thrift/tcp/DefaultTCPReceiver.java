@@ -18,8 +18,8 @@ package com.navercorp.pinpoint.collector.receiver.thrift.tcp;
 
 import com.navercorp.pinpoint.collector.receiver.thrift.PinpointServerAcceptorProvider;
 import com.navercorp.pinpoint.rpc.server.PinpointServerAcceptor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 import java.net.InetSocketAddress;
 import java.util.Objects;
@@ -45,15 +45,15 @@ public class DefaultTCPReceiver implements TCPReceiver {
 
 
     public DefaultTCPReceiver(String name, TCPPacketHandler tcpPacketHandler, Executor executor, InetSocketAddress bindAddress, PinpointServerAcceptorProvider acceptorProvider) {
-        this.name = Objects.requireNonNull(name, "name must not be null");
-        this.logger = LoggerFactory.getLogger(name);
+        this.name = Objects.requireNonNull(name, "name");
+        this.logger = LogManager.getLogger(name);
 
-        this.bindAddress = Objects.requireNonNull(bindAddress, "bindAddress must not be null");
+        this.bindAddress = Objects.requireNonNull(bindAddress, "bindAddress");
 
-        this.acceptorProvider = Objects.requireNonNull(acceptorProvider, "acceptorProvider must not be null");
-        this.executor = Objects.requireNonNull(executor, "executor must not be null");
+        this.acceptorProvider = Objects.requireNonNull(acceptorProvider, "acceptorProvider");
+        this.executor = Objects.requireNonNull(executor, "executor");
 
-        this.tcpPacketHandler = Objects.requireNonNull(tcpPacketHandler, "tcpPacketHandler must not be null");
+        this.tcpPacketHandler = Objects.requireNonNull(tcpPacketHandler, "tcpPacketHandler");
 
     }
 

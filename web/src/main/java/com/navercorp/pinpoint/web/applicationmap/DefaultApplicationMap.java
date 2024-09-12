@@ -16,16 +16,14 @@
 
 package com.navercorp.pinpoint.web.applicationmap;
 
-import com.navercorp.pinpoint.common.util.CollectionUtils;
+import com.navercorp.pinpoint.common.server.util.time.Range;
 import com.navercorp.pinpoint.web.applicationmap.link.Link;
 import com.navercorp.pinpoint.web.applicationmap.link.LinkList;
 import com.navercorp.pinpoint.web.applicationmap.nodes.Node;
 import com.navercorp.pinpoint.web.applicationmap.nodes.NodeList;
-import com.navercorp.pinpoint.web.vo.Range;
-
-import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.Collection;
+import java.util.List;
 
 /**
  * Node map
@@ -33,34 +31,12 @@ import java.util.Collection;
  * @author netspider
  * @author emeroad
  */
-public class DefaultApplicationMap implements ApplicationMap {
+public class DefaultApplicationMap {
 
-    private final NodeList nodeList;
-    private final LinkList linkList;
-
-    private final Range range;
-
-//    private List<ApplicationScatterScanResult> applicationScatterScanResultList;
-
-    public DefaultApplicationMap(Range range, NodeList nodeList, LinkList linkList) {
-        if (range == null) {
-            throw new NullPointerException("range must not be null");
-        }
-        if (nodeList == null) {
-            throw new NullPointerException("nodeList must not be null");
-        }
-        if (linkList == null) {
-            throw new NullPointerException("linkList must not be null");
-        }
-        this.range = range;
-        this.nodeList = nodeList;
-        this.linkList = createNewLinkList(linkList);
-    }
-
-    private LinkList createNewLinkList(LinkList originalLinkList) {
+    private static Collection<Link> createNewLinkList(LinkList originalLinkList) {
         Collection<Link> linkList = originalLinkList.getLinkList();
-        if (CollectionUtils.nullSafeSize(linkList) == 0) {
-            return originalLinkList;
+        if (linkList.isEmpty()) {
+            return List.of();
         }
 
         LinkList newLinkList = new LinkList();
@@ -70,25 +46,17 @@ public class DefaultApplicationMap implements ApplicationMap {
             }
             if (link.getHistogram().getTotalCount() == 0) {
                 continue;
-
             }
             newLinkList.addLink(link);
         }
 
-        return newLinkList;
+        return newLinkList.getLinkList();
     }
 
-    @JsonProperty("nodeDataArray")
-    public Collection<Node> getNodes() {
-        return this.nodeList.getNodeList();
+    public static ApplicationMap build(NodeList nodeList, LinkList linkList, Range range) {
+        Collection<Node> nodes = nodeList.getNodeList();
+        Collection<Link> links = createNewLinkList(linkList);
+        return new SimpleApplicationMap(nodes, links, range);
     }
 
-    @JsonProperty("linkDataArray")
-    public Collection<Link> getLinks() {
-        return this.linkList.getLinkList();
-    }
-
-    public Range getRange() {
-        return range;
-    }
 }

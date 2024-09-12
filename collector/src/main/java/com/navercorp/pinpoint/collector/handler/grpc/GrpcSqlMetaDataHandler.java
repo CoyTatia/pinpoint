@@ -16,10 +16,10 @@
 
 package com.navercorp.pinpoint.collector.handler.grpc;
 
+import com.google.protobuf.GeneratedMessageV3;
 import com.navercorp.pinpoint.collector.handler.RequestResponseHandler;
 import com.navercorp.pinpoint.collector.service.SqlMetaDataService;
 import com.navercorp.pinpoint.common.server.bo.SqlMetaDataBo;
-import com.navercorp.pinpoint.grpc.AgentHeaderFactory;
 import com.navercorp.pinpoint.grpc.Header;
 import com.navercorp.pinpoint.grpc.MessageFormatUtils;
 import com.navercorp.pinpoint.grpc.server.ServerContext;
@@ -27,31 +27,40 @@ import com.navercorp.pinpoint.grpc.trace.PResult;
 import com.navercorp.pinpoint.grpc.trace.PSqlMetaData;
 import com.navercorp.pinpoint.io.request.ServerRequest;
 import com.navercorp.pinpoint.io.request.ServerResponse;
+import com.navercorp.pinpoint.thrift.io.DefaultTBaseLocator;
 import io.grpc.Status;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Service;
+
+import java.util.Arrays;
+import java.util.Objects;
 
 /**
  * @author emeroad
  */
 @Service
-public class GrpcSqlMetaDataHandler implements RequestResponseHandler {
-    private final Logger logger = LoggerFactory.getLogger(getClass());
+public class GrpcSqlMetaDataHandler implements RequestResponseHandler<GeneratedMessageV3, GeneratedMessageV3> {
+    private final Logger logger = LogManager.getLogger(getClass());
     private final boolean isDebug = logger.isDebugEnabled();
 
-    @Autowired
-    private SqlMetaDataService sqlMetaDataService;
+    private final SqlMetaDataService[] sqlMetaDataServices;
 
-    public GrpcSqlMetaDataHandler() {
+    public GrpcSqlMetaDataHandler(SqlMetaDataService[] sqlMetaDataServices) {
+        this.sqlMetaDataServices = Objects.requireNonNull(sqlMetaDataServices, "sqlMetaDataServices");
+        logger.info("SqlMetaDataServices {}", Arrays.toString(sqlMetaDataServices));
     }
 
     @Override
-    public void handleRequest(ServerRequest serverRequest, ServerResponse serverResponse) {
-        final Object data = serverRequest.getData();
-        if (data instanceof PSqlMetaData) {
-            Object result = handleSqlMetaData((PSqlMetaData) data);
+    public int type() {
+        return DefaultTBaseLocator.SQLMETADATA;
+    }
+
+    @Override
+    public void handleRequest(ServerRequest<GeneratedMessageV3> serverRequest, ServerResponse<GeneratedMessageV3> serverResponse) {
+        final GeneratedMessageV3 data = serverRequest.getData();
+        if (data instanceof PSqlMetaData sqlMetaData) {
+            PResult result = handleSqlMetaData(sqlMetaData);
             serverResponse.write(result);
         } else {
             logger.warn("Invalid request type. serverRequest={}", serverRequest);
@@ -59,24 +68,44 @@ public class GrpcSqlMetaDataHandler implements RequestResponseHandler {
         }
     }
 
-    private Object handleSqlMetaData(PSqlMetaData sqlMetaData) {
+    private PResult handleSqlMetaData(PSqlMetaData sqlMetaData) {
         if (isDebug) {
             logger.debug("Handle PSqlMetaData={}", MessageFormatUtils.debugLog(sqlMetaData));
         }
 
-        try {
-            final Header agentInfo = ServerContext.getAgentInfo();
-            final String agentId = agentInfo.getAgentId();
-            final long agentStartTime = agentInfo.getAgentStartTime();
+        final Header agentInfo = ServerContext.getAgentInfo();
+        final SqlMetaDataBo sqlMetaDataBo = mapSqlMetaDataBo(agentInfo, sqlMetaData);
 
-            final SqlMetaDataBo sqlMetaDataBo = new SqlMetaDataBo(agentId, agentStartTime, sqlMetaData.getSqlId());
-            sqlMetaDataBo.setSql(sqlMetaData.getSql());
-            sqlMetaDataService.insert(sqlMetaDataBo);
-            return PResult.newBuilder().setSuccess(true).build();
-        } catch (Exception e) {
-            logger.warn("Failed to handle sqlMetaData={}", MessageFormatUtils.debugLog(sqlMetaData), e);
-            // Avoid detailed error messages.
-            return PResult.newBuilder().setSuccess(false).setMessage("Internal Server Error").build();
+        boolean result = true;
+        for (SqlMetaDataService sqlMetaDataService : sqlMetaDataServices) {
+            try {
+                sqlMetaDataService.insert(sqlMetaDataBo);
+            } catch (Throwable e) {
+                // Avoid detailed error messages.
+                logger.warn("Failed to handle sqlMetaData={}", MessageFormatUtils.debugLog(sqlMetaData), e);
+                result = false;
+            }
         }
+
+        return newResult(result);
+    }
+
+    private static SqlMetaDataBo mapSqlMetaDataBo(Header agentInfo, PSqlMetaData sqlMetaData) {
+        final String agentId = agentInfo.getAgentId();
+        final long agentStartTime = agentInfo.getAgentStartTime();
+        final int sqlId = sqlMetaData.getSqlId();
+        final String sql = sqlMetaData.getSql();
+
+        return new SqlMetaDataBo(agentId, agentStartTime, sqlId, sql);
+    }
+
+    private static PResult newResult(boolean success) {
+        final PResult.Builder builder = PResult.newBuilder();
+        if (success) {
+            builder.setSuccess(true);
+        } else {
+            builder.setSuccess(false).setMessage("Internal Server Error");
+        }
+        return builder.build();
     }
 }

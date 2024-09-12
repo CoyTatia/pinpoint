@@ -16,25 +16,17 @@
 
 package com.navercorp.pinpoint.collector.dao.hbase.stat;
 
-import com.navercorp.pinpoint.collector.dao.AgentStatDaoV2;
-import com.navercorp.pinpoint.common.hbase.HbaseOperations2;
 import com.navercorp.pinpoint.common.hbase.HbaseTable;
 import com.navercorp.pinpoint.common.hbase.TableNameProvider;
+import com.navercorp.pinpoint.common.hbase.async.HbasePutWriter;
 import com.navercorp.pinpoint.common.server.bo.serializer.stat.AgentStatHbaseOperationFactory;
+import com.navercorp.pinpoint.common.server.bo.serializer.stat.AgentStatSerializer;
 import com.navercorp.pinpoint.common.server.bo.serializer.stat.AgentStatUtils;
-import com.navercorp.pinpoint.common.server.bo.serializer.stat.DataSourceSerializer;
+import com.navercorp.pinpoint.common.server.bo.stat.AgentStatBo;
 import com.navercorp.pinpoint.common.server.bo.stat.AgentStatType;
 import com.navercorp.pinpoint.common.server.bo.stat.DataSourceBo;
 import com.navercorp.pinpoint.common.server.bo.stat.DataSourceListBo;
-import com.navercorp.pinpoint.common.util.CollectionUtils;
-
-import org.apache.commons.collections.map.MultiKeyMap;
-import org.apache.hadoop.hbase.TableName;
-import org.apache.hadoop.hbase.client.Put;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Repository;
+import org.apache.commons.collections4.map.MultiKeyMap;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -43,46 +35,20 @@ import java.util.List;
 /**
  * @author Taejin Koo
  */
-@Repository
-public class HbaseDataSourceListDao implements AgentStatDaoV2<DataSourceListBo> {
+public class HbaseDataSourceListDao extends DefaultAgentStatDao<DataSourceListBo> {
 
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
-
-    @Autowired
-    private HbaseOperations2 hbaseTemplate;
-
-    @Autowired
-    private TableNameProvider tableNameProvider;
-
-    @Autowired
-    private AgentStatHbaseOperationFactory agentStatHbaseOperationFactory;
-
-    @Autowired
-    private DataSourceSerializer dataSourceSerializer;
-
-    @Override
-    public void insert(String agentId, List<DataSourceListBo> dataSourceListBos) {
-        if (agentId == null) {
-            throw new NullPointerException("agentId must not be null");
-        }
-        if (CollectionUtils.isEmpty(dataSourceListBos)) {
-            return;
-        }
-
-        List<DataSourceListBo> reorderedDataSourceListBos = reorderDataSourceListBos(dataSourceListBos);
-        List<Put> activeTracePuts = this.agentStatHbaseOperationFactory.createPuts(agentId, AgentStatType.DATASOURCE, reorderedDataSourceListBos, dataSourceSerializer);
-        if (!activeTracePuts.isEmpty()) {
-            TableName agentStatTableName = tableNameProvider.getTableName(HbaseTable.AGENT_STAT_VER2);
-            List<Put> rejectedPuts = this.hbaseTemplate.asyncPut(agentStatTableName, activeTracePuts);
-            if (CollectionUtils.hasLength(rejectedPuts)) {
-                this.hbaseTemplate.put(agentStatTableName, rejectedPuts);
-            }
-        }
+    public HbaseDataSourceListDao(HbasePutWriter putWriter,
+                                  TableNameProvider tableNameProvider,
+                                  AgentStatHbaseOperationFactory operationFactory,
+                                  AgentStatSerializer<DataSourceListBo> serializer) {
+        super(AgentStatType.DATASOURCE, HbaseTable.AGENT_STAT_VER2, AgentStatBo::getDataSourceListBos,
+                putWriter, tableNameProvider, operationFactory, serializer);
+        this.preprocessor = this::reorderDataSourceListBos;
     }
 
     private List<DataSourceListBo> reorderDataSourceListBos(List<DataSourceListBo> dataSourceListBos) {
         // reorder dataSourceBo using id and timeSlot
-        MultiKeyMap dataSourceListBoMap = new MultiKeyMap();
+        MultiKeyMap<Long, DataSourceListBo> dataSourceListBoMap = new MultiKeyMap<>();
 
         for (DataSourceListBo dataSourceListBo : dataSourceListBos) {
             for (DataSourceBo dataSourceBo : dataSourceListBo.getList()) {
@@ -90,14 +56,14 @@ public class HbaseDataSourceListDao implements AgentStatDaoV2<DataSourceListBo> 
                 long timestamp = dataSourceBo.getTimestamp();
                 long timeSlot = AgentStatUtils.getBaseTimestamp(timestamp);
 
-                DataSourceListBo mappedDataSourceListBo = (DataSourceListBo) dataSourceListBoMap.get(id, timeSlot);
+                DataSourceListBo mappedDataSourceListBo = dataSourceListBoMap.get(id, timeSlot);
                 if (mappedDataSourceListBo == null) {
                     mappedDataSourceListBo = new DataSourceListBo();
                     mappedDataSourceListBo.setAgentId(dataSourceBo.getAgentId());
                     mappedDataSourceListBo.setStartTimestamp(dataSourceBo.getStartTimestamp());
                     mappedDataSourceListBo.setTimestamp(dataSourceBo.getTimestamp());
 
-                    dataSourceListBoMap.put(id, timeSlot, mappedDataSourceListBo);
+                    dataSourceListBoMap.put((long) id, timeSlot, mappedDataSourceListBo);
                 }
 
                 // set fastest timestamp
@@ -109,8 +75,8 @@ public class HbaseDataSourceListDao implements AgentStatDaoV2<DataSourceListBo> 
             }
         }
 
-        Collection values = dataSourceListBoMap.values();
-        return new ArrayList<DataSourceListBo>(values);
+        Collection<DataSourceListBo> values = dataSourceListBoMap.values();
+        return new ArrayList<>(values);
     }
 
 }

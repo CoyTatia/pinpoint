@@ -16,9 +16,13 @@
 
 package com.navercorp.pinpoint.collector.receiver.grpc;
 
+import com.google.protobuf.GeneratedMessageV3;
+import com.navercorp.pinpoint.collector.receiver.BindAddress;
 import com.navercorp.pinpoint.collector.receiver.DispatchHandler;
 import com.navercorp.pinpoint.collector.receiver.grpc.service.AgentService;
+import com.navercorp.pinpoint.collector.receiver.grpc.service.DefaultServerRequestFactory;
 import com.navercorp.pinpoint.collector.receiver.grpc.service.MetadataService;
+import com.navercorp.pinpoint.collector.receiver.grpc.service.ServerRequestFactory;
 import com.navercorp.pinpoint.common.server.util.AddressFilter;
 import com.navercorp.pinpoint.grpc.server.ServerOption;
 import com.navercorp.pinpoint.grpc.server.lifecycle.PingEventHandler;
@@ -27,10 +31,10 @@ import com.navercorp.pinpoint.grpc.trace.PResult;
 import com.navercorp.pinpoint.io.request.ServerRequest;
 import com.navercorp.pinpoint.io.request.ServerResponse;
 import io.grpc.BindableService;
-import io.grpc.Status;
+import io.grpc.ServerServiceDefinition;
 
 import java.net.InetAddress;
-import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -43,22 +47,30 @@ public class AgentServerTestMain {
     public static final String IP = "0.0.0.0";
     public static final int PORT = 9997;
 
+    private final ServerRequestFactory serverRequestFactory = new DefaultServerRequestFactory();
+
     public void run() throws Exception {
         GrpcReceiver grpcReceiver = new GrpcReceiver();
         grpcReceiver.setEnable(true);
         grpcReceiver.setBeanName("AgentServer");
-        grpcReceiver.setBindIp(IP);
-        grpcReceiver.setBindPort(PORT);
+
+        BindAddress.Builder builder = BindAddress.newBuilder();
+        builder.setPort(PORT);
+        builder.setIp(IP);
+        grpcReceiver.setBindAddress(builder.build());
 
         PingEventHandler pingEventHandler = mock(PingEventHandler.class);
-        BindableService agentService = new AgentService(new MockDispatchHandler(), pingEventHandler);
-        grpcReceiver.setBindableServiceList(Arrays.asList(agentService, new MetadataService(new MockDispatchHandler())));
+        BindableService agentService = new AgentService(new MockDispatchHandler(), pingEventHandler, Executors.newFixedThreadPool(8), serverRequestFactory);
+
+        MetadataService metadataService = new MetadataService(new MockDispatchHandler(), Executors.newFixedThreadPool(8), serverRequestFactory);
+        List<ServerServiceDefinition> serviceList = List.of(agentService.bindService(), metadataService.bindService());
+        grpcReceiver.setBindableServiceList(serviceList);
         grpcReceiver.setAddressFilter(new MockAddressFilter());
         grpcReceiver.setExecutor(Executors.newFixedThreadPool(8));
-        grpcReceiver.setServerOption(new ServerOption.Builder().build());
+        grpcReceiver.setServerOption(ServerOption.newBuilder().build());
+
 
         grpcReceiver.afterPropertiesSet();
-
         grpcReceiver.blockUntilShutdown();
         grpcReceiver.destroy();
     }
@@ -73,22 +85,23 @@ public class AgentServerTestMain {
         }
     }
 
-    private static class MockDispatchHandler implements DispatchHandler {
-        private static AtomicInteger counter = new AtomicInteger(0);
+    private static class MockDispatchHandler implements DispatchHandler<GeneratedMessageV3, GeneratedMessageV3> {
+        private static final AtomicInteger counter = new AtomicInteger(0);
 
         @Override
-        public void dispatchSendMessage(ServerRequest serverRequest) {
+        public void dispatchSendMessage(ServerRequest<GeneratedMessageV3> serverRequest) {
             System.out.println("Dispatch send message " + serverRequest);
         }
 
         @Override
-        public void dispatchRequestMessage(ServerRequest serverRequest, ServerResponse serverResponse) {
+        public void dispatchRequestMessage(ServerRequest<GeneratedMessageV3> serverRequest, ServerResponse<GeneratedMessageV3> serverResponse) {
             System.out.println("Dispatch request message " + serverRequest + ", " + serverResponse);
-            if (serverRequest.getData() instanceof PApiMetaData) {
-                PApiMetaData apiMetaData = (PApiMetaData) serverRequest.getData();
-                serverResponse.write(PResult.newBuilder().setMessage(String.valueOf(apiMetaData.getApiId())).build());
+            if (serverRequest.getData() instanceof PApiMetaData apiMetaData) {
+                PResult result = PResult.newBuilder().setMessage(String.valueOf(apiMetaData.getApiId())).build();
+                serverResponse.write(result);
             } else {
-                serverResponse.write(PResult.newBuilder().setMessage("Success " + counter.getAndIncrement()).build());
+                PResult result = PResult.newBuilder().setMessage("Success " + counter.getAndIncrement()).build();
+                serverResponse.write(result);
             }
         }
     }

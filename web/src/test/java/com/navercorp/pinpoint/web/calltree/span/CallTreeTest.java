@@ -16,15 +16,15 @@
 
 package com.navercorp.pinpoint.web.calltree.span;
 
-import static org.junit.Assert.*;
+import com.navercorp.pinpoint.common.server.bo.SpanBo;
+import com.navercorp.pinpoint.common.server.bo.SpanChunkBo;
+import com.navercorp.pinpoint.common.server.bo.SpanEventBo;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import org.junit.Test;
-
-import com.navercorp.pinpoint.common.server.bo.SpanBo;
-import com.navercorp.pinpoint.common.server.bo.SpanEventBo;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * 
@@ -36,8 +36,8 @@ public class CallTreeTest {
     private static final boolean SYNC = false;
     private static final boolean ASYNC = true;
 
-    private SpanCallTree callTree = new SpanCallTree(makeSpanAlign());
-    private List<String> expectResult = new ArrayList<String>();
+    private final SpanCallTree callTree = new SpanCallTree(makeSpanAlign());
+    private final List<String> expectResult = new ArrayList<String>();
 
     @Test
     public void add() {
@@ -371,13 +371,28 @@ public class CallTreeTest {
 
     private Align makeSpanAlign(SpanBo span, final boolean async, final short sequence, int nextAsyncId, final int asyncId, int startElapsed, int endElapsed) {
         SpanEventBo event = new SpanEventBo();
-        event.setAsyncId(async ? 1 : -1);
+//        event.setAsyncId(async ? 1 : -1);
         event.setSequence(sequence);
         event.setNextAsyncId(nextAsyncId);
-        event.setAsyncId(asyncId);
+//        event.setAsyncId(asyncId);
         event.setStartElapsed(startElapsed);
         event.setEndElapsed(endElapsed);
+        if (!async) {
+            return new SpanEventAlign(span, event);
+        }
 
-        return new SpanEventAlign(span, event);
+        SpanChunkBo spanChunkBo = new SpanChunkBo();
+        spanChunkBo.setVersion(span.getVersion());
+        spanChunkBo.setTransactionId(span.getTransactionId());
+        spanChunkBo.setSpanId(span.getSpanId());
+        spanChunkBo.setAgentId(span.getAgentId());
+        spanChunkBo.setAgentName(span.getAgentName());
+        spanChunkBo.setApplicationId(span.getApplicationId());
+        spanChunkBo.setServiceType(span.getServiceType());
+        spanChunkBo.setApplicationServiceType(span.getApplicationServiceType());
+        spanChunkBo.setCollectorAcceptTime(span.getCollectorAcceptTime());
+        spanChunkBo.setEndPoint(span.getEndPoint());
+
+        return new SpanChunkEventAlign(span, spanChunkBo, event);
     }
 }

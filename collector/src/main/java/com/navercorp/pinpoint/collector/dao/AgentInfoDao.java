@@ -20,7 +20,10 @@ import com.navercorp.pinpoint.common.server.bo.AgentInfoBo;
 
 /**
  * @author emeroad
+ * @author jaehong.kim
  */
 public interface AgentInfoDao {
     void insert(AgentInfoBo agentInfo);
+
+    AgentInfoBo getSimpleAgentInfo(String agentId, long timestamp);
 }

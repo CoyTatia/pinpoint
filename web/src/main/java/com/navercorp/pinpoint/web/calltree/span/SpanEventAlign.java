@@ -19,7 +19,6 @@ package com.navercorp.pinpoint.web.calltree.span;
 import com.navercorp.pinpoint.common.server.bo.AnnotationBo;
 import com.navercorp.pinpoint.common.server.bo.SpanBo;
 import com.navercorp.pinpoint.common.server.bo.SpanEventBo;
-import com.navercorp.pinpoint.common.util.TransactionIdUtils;
 
 import java.util.List;
 import java.util.Objects;
@@ -39,8 +38,8 @@ public class SpanEventAlign implements Align {
 
 
     public SpanEventAlign(SpanBo spanBo, SpanEventBo spanEventBo) {
-        this.spanBo = Objects.requireNonNull(spanBo, "spanBo must not be null");
-        this.spanEventBo = Objects.requireNonNull(spanEventBo, "spanEventBo must not be null");
+        this.spanBo = Objects.requireNonNull(spanBo, "spanBo");
+        this.spanEventBo = Objects.requireNonNull(spanEventBo, "spanEventBo");
     }
 
     @Override
@@ -149,8 +148,18 @@ public class SpanEventAlign implements Align {
     }
 
     @Override
+    public String getAgentName() {
+        return spanBo.getAgentName();
+    }
+
+    @Override
     public String getApplicationId() {
         return spanBo.getApplicationId();
+    }
+
+    @Override
+    public Short getApplicationServiceType() {
+        return spanBo.getApplicationServiceType();
     }
 
     @Override
@@ -165,7 +174,7 @@ public class SpanEventAlign implements Align {
 
     @Override
     public String getTransactionId() {
-        return TransactionIdUtils.formatString(spanBo.getTransactionId());
+        return spanBo.getTransactionId().toString();
     }
 
     @Override
@@ -236,7 +245,7 @@ public class SpanEventAlign implements Align {
     @Override
     public String toString() {
         return "SpanEventAlign{" +
-                "spanBo=" + spanBo +
+                "spanBo=" + spanBo.getSpanId() +
                 ", spanEventBo=" + spanEventBo +
                 ", id=" + id +
                 ", gap=" + gap +
@@ -245,4 +254,47 @@ public class SpanEventAlign implements Align {
                 '}';
     }
 
+    public static class Builder {
+        private final SpanBo spanBo;
+        private final SpanEventBo spanEventBo;
+
+        private int id;
+        private long gap;
+        private int depth;
+        private long executionMilliseconds;
+
+        public Builder(SpanBo spanBo, SpanEventBo spanEventBo) {
+            this.spanBo = spanBo;
+            this.spanEventBo = spanEventBo;
+        }
+
+        public Builder setId(int id) {
+            this.id = id;
+            return this;
+        }
+
+        public Builder setGap(long gap) {
+            this.gap = gap;
+            return this;
+        }
+
+        public Builder setDepth(int depth) {
+            this.depth = depth;
+            return this;
+        }
+
+        public Builder setExecutionMilliseconds(long executionMilliseconds) {
+            this.executionMilliseconds = executionMilliseconds;
+            return this;
+        }
+
+        public SpanEventAlign build() {
+            SpanEventAlign result = new SpanEventAlign(this.spanBo, this.spanEventBo);
+            result.setId(this.id);
+            result.setGap(this.gap);
+            result.setDepth(this.depth);
+            result.setExecutionMilliseconds(this.executionMilliseconds);
+            return result;
+        }
+    }
 }

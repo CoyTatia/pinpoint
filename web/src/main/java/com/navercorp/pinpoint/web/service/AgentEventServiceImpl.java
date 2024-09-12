@@ -21,24 +21,23 @@ import com.navercorp.pinpoint.common.server.util.AgentEventMessageDeserializer;
 import com.navercorp.pinpoint.common.server.util.AgentEventMessageDeserializerV1;
 import com.navercorp.pinpoint.common.server.util.AgentEventType;
 import com.navercorp.pinpoint.common.server.util.AgentEventTypeCategory;
+import com.navercorp.pinpoint.common.server.util.time.Range;
 import com.navercorp.pinpoint.common.util.ArrayUtils;
 import com.navercorp.pinpoint.web.dao.AgentEventDao;
+import com.navercorp.pinpoint.web.service.component.AgentEventQuery;
 import com.navercorp.pinpoint.web.vo.AgentEvent;
 import com.navercorp.pinpoint.web.vo.DurationalAgentEvent;
-import com.navercorp.pinpoint.web.vo.Range;
-import org.apache.commons.collections.CollectionUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.commons.collections4.CollectionUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Service;
 
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.EnumSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.PriorityQueue;
-import java.util.Set;
 
 /**
  * @author HyunGil Jeong
@@ -47,51 +46,50 @@ import java.util.Set;
 @Service
 public class AgentEventServiceImpl implements AgentEventService {
 
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
 
-    @Autowired
-    private AgentEventDao agentEventDao;
+    private final AgentEventDao agentEventDao;
 
-    @Autowired
-    private AgentEventMessageDeserializer agentEventMessageDeserializer;
+    private final AgentEventMessageDeserializer agentEventMessageDeserializer;
 
-    @Autowired
-    private AgentEventMessageDeserializerV1 agentEventMessageDeserializerV1;
+    private final AgentEventMessageDeserializerV1 agentEventMessageDeserializerV1;
+
+    public AgentEventServiceImpl(AgentEventDao agentEventDao,
+                                 AgentEventMessageDeserializer agentEventMessageDeserializer,
+                                 AgentEventMessageDeserializerV1 agentEventMessageDeserializerV1) {
+        this.agentEventDao = Objects.requireNonNull(agentEventDao, "agentEventDao");
+        this.agentEventMessageDeserializer = Objects.requireNonNull(agentEventMessageDeserializer, "agentEventMessageDeserializer");
+        this.agentEventMessageDeserializerV1 = Objects.requireNonNull(agentEventMessageDeserializerV1, "agentEventMessageDeserializerV1");
+    }
 
     @Override
-    public List<AgentEvent> getAgentEvents(String agentId, Range range, int... excludeEventTypeCodes) {
-        if (agentId == null) {
-            throw new NullPointerException("agentId must not be null");
-        }
-        Set<AgentEventType> excludeEventTypes = EnumSet.noneOf(AgentEventType.class);
-        for (int excludeEventTypeCode : excludeEventTypeCodes) {
-            AgentEventType excludeEventType = AgentEventType.getTypeByCode(excludeEventTypeCode);
-            if (excludeEventType != null) {
-                excludeEventTypes.add(excludeEventType);
-            }
-        }
-        List<AgentEventBo> agentEventBos = this.agentEventDao.getAgentEvents(agentId, range, excludeEventTypes);
+    public List<AgentEvent> getAgentEvents(String agentId, Range range) {
+        return getAgentEvents(agentId, range, AgentEventQuery.all());
+    }
+
+    @Override
+    public List<AgentEvent> getAgentEvents(String agentId, Range range, AgentEventQuery query) {
+        Objects.requireNonNull(agentId, "agentId");
+        Objects.requireNonNull(query, "query");
+
+        List<AgentEventBo> agentEventBos = this.agentEventDao.getAgentEvents(agentId, range, query);
+
         List<AgentEvent> agentEvents = createAgentEvents(agentEventBos);
         agentEvents.sort(AgentEvent.EVENT_TIMESTAMP_ASC_COMPARATOR);
         return agentEvents;
     }
 
     @Override
-    public AgentEvent getAgentEvent(String agentId, long eventTimestamp, int eventTypeCode) {
-        if (agentId == null) {
-            throw new NullPointerException("agentId must not be null");
-        }
+    public AgentEvent getAgentEvent(String agentId, long eventTimestamp, AgentEventType eventType) {
+        Objects.requireNonNull(agentId, "agentId");
         if (eventTimestamp < 0) {
             throw new IllegalArgumentException("eventTimeTimestamp must not be less than 0");
         }
-        final AgentEventType eventType = AgentEventType.getTypeByCode(eventTypeCode);
-        if (eventType == null) {
-            throw new IllegalArgumentException("invalid eventTypeCode [" + eventTypeCode + "]");
-        }
-        final boolean includeEventMessage = true;
+        Objects.requireNonNull(eventType, "eventType");
+
         AgentEventBo agentEventBo = this.agentEventDao.getAgentEvent(agentId, eventTimestamp, eventType);
         if (agentEventBo != null) {
-            return createAgentEvent(agentEventBo, includeEventMessage);
+            return createAgentEvent(agentEventBo, true);
         }
         return null;
     }
@@ -106,7 +104,7 @@ public class AgentEventServiceImpl implements AgentEventService {
             if (agentEventBo.getEventType().isCategorizedAs(AgentEventTypeCategory.DURATIONAL)) {
                 durationalAgentEvents.add(createDurationalAgentEvent(agentEventBo, false));
             } else {
-                boolean hasMessage = !ArrayUtils.isEmpty(agentEventBo.getEventBody());
+                boolean hasMessage = ArrayUtils.hasLength(agentEventBo.getEventBody());
                 agentEvents.add(createAgentEvent(agentEventBo, hasMessage));
             }
         }
@@ -129,20 +127,18 @@ public class AgentEventServiceImpl implements AgentEventService {
     }
 
     private AgentEvent createAgentEvent(AgentEventBo agentEventBo, boolean includeEventMessage) {
-        AgentEvent agentEvent = new AgentEvent(agentEventBo);
         if (includeEventMessage) {
-            agentEvent.setEventMessage(deserializeEventMessage(agentEventBo));
+            return AgentEvent.withEventMessage(agentEventBo, deserializeEventMessage(agentEventBo));
         }
-        return agentEvent;
+        return AgentEvent.from(agentEventBo);
     }
 
     @Deprecated
     private DurationalAgentEvent createDurationalAgentEvent(AgentEventBo agentEventBo, boolean includeEventMessage) {
-        DurationalAgentEvent durationalAgentEvent = new DurationalAgentEvent(agentEventBo);
         if (includeEventMessage) {
-            durationalAgentEvent.setEventMessage(deserializeEventMessage(agentEventBo));
+            return new DurationalAgentEvent(agentEventBo, deserializeEventMessage(agentEventBo));
         }
-        return durationalAgentEvent;
+        return new DurationalAgentEvent(agentEventBo);
     }
 
     private Object deserializeEventMessage(AgentEventBo agentEventBo) {

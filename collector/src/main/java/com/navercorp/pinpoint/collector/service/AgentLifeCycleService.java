@@ -18,17 +18,23 @@ package com.navercorp.pinpoint.collector.service;
 
 import com.navercorp.pinpoint.collector.dao.AgentLifeCycleDao;
 import com.navercorp.pinpoint.common.server.bo.AgentLifeCycleBo;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.scheduling.annotation.Async;
+import jakarta.validation.Valid;
 import org.springframework.stereotype.Service;
+import org.springframework.validation.annotation.Validated;
+
+import java.util.Objects;
 
 @Service
+@Validated
 public class AgentLifeCycleService {
 
-    @Autowired
-    private AgentLifeCycleDao agentLifeCycleDao;
+    private final AgentLifeCycleDao agentLifeCycleDao;
 
-    public void insert(final AgentLifeCycleBo agentLifeCycleBo) {
+    public AgentLifeCycleService(AgentLifeCycleDao agentLifeCycleDao) {
+        this.agentLifeCycleDao = Objects.requireNonNull(agentLifeCycleDao, "agentLifeCycleDao");
+    }
+
+    public void insert(@Valid final AgentLifeCycleBo agentLifeCycleBo) {
         this.agentLifeCycleDao.insert(agentLifeCycleBo);
     }
 

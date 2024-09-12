@@ -16,10 +16,12 @@
 
 package com.navercorp.pinpoint.collector.handler.grpc;
 
+import com.google.protobuf.GeneratedMessageV3;
 import com.navercorp.pinpoint.collector.handler.RequestResponseHandler;
 import com.navercorp.pinpoint.collector.service.ApiMetaDataService;
 import com.navercorp.pinpoint.common.server.bo.ApiMetaDataBo;
 import com.navercorp.pinpoint.common.server.bo.MethodTypeEnum;
+import com.navercorp.pinpoint.common.util.LineNumber;
 import com.navercorp.pinpoint.grpc.Header;
 import com.navercorp.pinpoint.grpc.MessageFormatUtils;
 import com.navercorp.pinpoint.grpc.server.ServerContext;
@@ -27,29 +29,39 @@ import com.navercorp.pinpoint.grpc.trace.PApiMetaData;
 import com.navercorp.pinpoint.grpc.trace.PResult;
 import com.navercorp.pinpoint.io.request.ServerRequest;
 import com.navercorp.pinpoint.io.request.ServerResponse;
+import com.navercorp.pinpoint.thrift.io.DefaultTBaseLocator;
 import io.grpc.Status;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Service;
+
+import java.util.Objects;
 
 /**
  * @author emeroad
  */
 @Service
-public class GrpcApiMetaDataHandler implements RequestResponseHandler {
+public class GrpcApiMetaDataHandler implements RequestResponseHandler<GeneratedMessageV3, GeneratedMessageV3> {
 
-    private final Logger logger = LoggerFactory.getLogger(getClass());
+    private final Logger logger = LogManager.getLogger(getClass());
     private final boolean isDebug = logger.isDebugEnabled();
 
-    @Autowired
-    private ApiMetaDataService apiMetaDataService;
+    private final ApiMetaDataService apiMetaDataService;
+
+    public GrpcApiMetaDataHandler(ApiMetaDataService apiMetaDataService) {
+        this.apiMetaDataService = Objects.requireNonNull(apiMetaDataService, "apiMetaDataService");
+    }
 
     @Override
-    public void handleRequest(ServerRequest serverRequest, ServerResponse serverResponse) {
-        final Object data = serverRequest.getData();
-        if (data instanceof PApiMetaData) {
-            Object result = handleApiMetaData((PApiMetaData) data);
+    public int type() {
+        return DefaultTBaseLocator.APIMETADATA;
+    }
+
+    @Override
+    public void handleRequest(ServerRequest<GeneratedMessageV3> serverRequest, ServerResponse<GeneratedMessageV3> serverResponse) {
+        final GeneratedMessageV3 data = serverRequest.getData();
+        if (data instanceof PApiMetaData apiMetaData) {
+            GeneratedMessageV3 result = handleApiMetaData(apiMetaData);
             serverResponse.write(result);
         } else {
             logger.warn("Invalid request type. serverRequest={}", serverRequest);
@@ -57,7 +69,7 @@ public class GrpcApiMetaDataHandler implements RequestResponseHandler {
         }
     }
 
-    private Object handleApiMetaData(final PApiMetaData apiMetaData) {
+    PResult handleApiMetaData(final PApiMetaData apiMetaData) {
         if (isDebug) {
             logger.debug("Handle PApiMetaData={}", MessageFormatUtils.debugLog(apiMetaData));
         }
@@ -66,19 +78,14 @@ public class GrpcApiMetaDataHandler implements RequestResponseHandler {
             final Header header = ServerContext.getAgentInfo();
             final String agentId = header.getAgentId();
             final long agentStartTime = header.getAgentStartTime();
+            final int line = LineNumber.defaultLineNumber(apiMetaData.getLine());
 
-            final ApiMetaDataBo apiMetaDataBo = new ApiMetaDataBo(agentId, agentStartTime, apiMetaData.getApiId());
-            apiMetaDataBo.setApiInfo(apiMetaData.getApiInfo());
+            final MethodTypeEnum type = MethodTypeEnum.defaultValueOf(apiMetaData.getType());
 
-            final int line = apiMetaData.getLine();
-            if (line != -1) {
-                apiMetaDataBo.setLineNumber(line);
-            }
-
-            final int type = apiMetaData.getType();
-            if (type != -1) {
-                apiMetaDataBo.setMethodTypeEnum(MethodTypeEnum.valueOf(type));
-            }
+            final ApiMetaDataBo apiMetaDataBo = new ApiMetaDataBo.Builder(agentId, agentStartTime,
+                    apiMetaData.getApiId(), line, type, apiMetaData.getApiInfo())
+                    .setLocation(apiMetaData.getLocation())
+                    .build();
 
             this.apiMetaDataService.insert(apiMetaDataBo);
             return PResult.newBuilder().setSuccess(true).build();

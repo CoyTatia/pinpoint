@@ -20,35 +20,36 @@ import com.navercorp.pinpoint.common.buffer.AutomaticBuffer;
 import com.navercorp.pinpoint.common.buffer.Buffer;
 import com.navercorp.pinpoint.common.buffer.FixedBuffer;
 
+import java.util.Objects;
+
 /**
  * @author HyunGil Jeong
  */
 public class JvmInfoBo {
 
     private final byte version;
-    private String jvmVersion;
-    private String gcTypeName;
+    private final String jvmVersion;
+    private final String gcTypeName;
 
-    public JvmInfoBo(int version) {
+    public JvmInfoBo(int version, String jvmVersion, String gcTypeName) {
         if (version < 0 || version > 255) {
             throw new IllegalArgumentException("version out of range (0~255)");
         }
         this.version = (byte) (version & 0xFF);
+        this.jvmVersion = Objects.requireNonNull(jvmVersion, "jvmVersion");
+        this.gcTypeName = Objects.requireNonNull(gcTypeName, "gcTypeName");
     }
 
     public JvmInfoBo(byte[] serializedJvmInfoBo) {
         final Buffer buffer = new FixedBuffer(serializedJvmInfoBo);
         this.version = buffer.readByte();
         int version = this.version & 0xFF;
-        switch (version) {
-            case 0:
-                this.jvmVersion = buffer.readPrefixedString();
-                this.gcTypeName = buffer.readPrefixedString();
-                break;
-            default:
-                this.jvmVersion = "";
-                this.gcTypeName = "";
-                break;
+        if (version == 0) {
+            this.jvmVersion = buffer.readPrefixedString();
+            this.gcTypeName = buffer.readPrefixedString();
+        } else {
+            this.jvmVersion = "";
+            this.gcTypeName = "";
         }
     }
 
@@ -60,17 +61,11 @@ public class JvmInfoBo {
         return jvmVersion;
     }
 
-    public void setJvmVersion(String jvmVersion) {
-        this.jvmVersion = jvmVersion;
-    }
 
     public String getGcTypeName() {
         return gcTypeName;
     }
 
-    public void setGcTypeName(String gcTypeName) {
-        this.gcTypeName = gcTypeName;
-    }
 
     public byte[] writeValue() {
         final Buffer buffer = new AutomaticBuffer();

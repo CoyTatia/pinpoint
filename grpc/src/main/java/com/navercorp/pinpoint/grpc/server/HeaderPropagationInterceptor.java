@@ -16,7 +16,8 @@
 
 package com.navercorp.pinpoint.grpc.server;
 
-import com.navercorp.pinpoint.common.util.Assert;
+import com.navercorp.pinpoint.common.profiler.logging.ThrottledLogger;
+import com.navercorp.pinpoint.grpc.Header;
 import com.navercorp.pinpoint.grpc.HeaderReader;
 import io.grpc.Context;
 import io.grpc.Contexts;
@@ -25,31 +26,38 @@ import io.grpc.ServerCall;
 import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
 import io.grpc.Status;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.util.Objects;
 
 /**
  * @author Woonduk Kang(emeroad)
  */
-public class HeaderPropagationInterceptor<H> implements ServerInterceptor {
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+public class HeaderPropagationInterceptor implements ServerInterceptor {
+    private final Logger logger = LogManager.getLogger(this.getClass());
+    private final ThrottledLogger throttledLogger = ThrottledLogger.getLogger(logger, 100);
 
-    private final HeaderReader<H> headerReader;
-    private final Context.Key<H> contextKey;
+    private final HeaderReader<Header> headerReader;
+    private final Context.Key<Header> contextKey;
 
-    public HeaderPropagationInterceptor(HeaderReader<H> headerReader, Context.Key<H> contextKey) {
-        this.headerReader = Assert.requireNonNull(headerReader, "headerReader must not be null");
-        this.contextKey = Assert.requireNonNull(contextKey, "contextKey must not be null");
+    public HeaderPropagationInterceptor(HeaderReader<Header> headerReader) {
+        this(headerReader, ServerContext.getAgentInfoKey());
+    }
+
+    public HeaderPropagationInterceptor(HeaderReader<Header> headerReader, Context.Key<Header> contextKey) {
+        this.headerReader = Objects.requireNonNull(headerReader, "headerReader");
+        this.contextKey = Objects.requireNonNull(contextKey, "contextKey");
     }
 
     @Override
     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(final ServerCall<ReqT, RespT> call, Metadata headers, ServerCallHandler<ReqT, RespT> next) {
-        H headerObject;
+        Header headerObject;
         try {
             headerObject = headerReader.extract(headers);
         } catch (Exception e) {
-            if (logger.isInfoEnabled()) {
-                logger.info("Header extract fail cause={}, method={} headers={}, attr={}",
+            if (throttledLogger.isInfoEnabled()) {
+                throttledLogger.info("Header extract fail cause={}, method={} headers={}, attr={}",
                         e.getMessage(), call.getMethodDescriptor().getFullMethodName(), headers, call.getAttributes(), e);
             }
             call.close(Status.INVALID_ARGUMENT.withDescription(e.getMessage()), new Metadata());
@@ -67,4 +75,10 @@ public class HeaderPropagationInterceptor<H> implements ServerInterceptor {
         return contextPropagateInterceptor;
     }
 
+    @Override
+    public String toString() {
+        return "HeaderPropagationInterceptor{" +
+                "headerReader=" + headerReader +
+                '}';
+    }
 }

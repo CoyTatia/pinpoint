@@ -18,15 +18,12 @@ package com.navercorp.pinpoint.web.service.stat;
 
 import com.navercorp.pinpoint.common.server.bo.stat.AgentWarningStatDataPoint;
 import com.navercorp.pinpoint.common.server.bo.stat.DeadlockThreadCountBo;
-import com.navercorp.pinpoint.common.util.CollectionUtils;
-import com.navercorp.pinpoint.rpc.util.ListUtils;
-import com.navercorp.pinpoint.web.dao.stat.DeadlockDao;
-import com.navercorp.pinpoint.web.vo.Range;
+import com.navercorp.pinpoint.common.server.util.time.Range;
+import com.navercorp.pinpoint.web.dao.stat.AgentStatDao;
 import com.navercorp.pinpoint.web.vo.timeline.inspector.AgentState;
 import com.navercorp.pinpoint.web.vo.timeline.inspector.AgentStatusTimelineSegment;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
+import org.springframework.util.CollectionUtils;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -34,6 +31,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * @author Taejin Koo
@@ -43,9 +41,11 @@ public class AgentWarningStatServiceImpl implements AgentWarningStatService {
 
     private static final long LIMIT_TIME = 60000;
 
-    @Autowired
-    @Qualifier("deadlockDaoV2")
-    private DeadlockDao deadlockDao;
+    private final AgentStatDao<DeadlockThreadCountBo> deadlockDao;
+
+    public AgentWarningStatServiceImpl(AgentStatDao<DeadlockThreadCountBo> deadlockDao) {
+        this.deadlockDao = Objects.requireNonNull(deadlockDao, "deadlockDao");
+    }
 
     @Override
     public List<AgentStatusTimelineSegment> select(String agentId, Range range) {
@@ -72,38 +72,29 @@ public class AgentWarningStatServiceImpl implements AgentWarningStatService {
     }
 
     private List<AgentWarningStatDataPoint> select0(String agentId, Range range) {
-        List<AgentWarningStatDataPoint> agentWarningStatDataPointList = new ArrayList<>();
 
         List<DeadlockThreadCountBo> deadlockThreadCountBoList = deadlockDao.getAgentStatList(agentId, range);
-        for (DeadlockThreadCountBo deadlockThreadCountBo : deadlockThreadCountBoList) {
-            agentWarningStatDataPointList.add(deadlockThreadCountBo);
-        }
 
+        List<AgentWarningStatDataPoint> agentWarningStatDataPointList = new ArrayList<>(deadlockThreadCountBoList);
         return agentWarningStatDataPointList;
     }
 
     private Map<Long, List<AgentWarningStatDataPoint>> parseByStartTimestamp(List<AgentWarningStatDataPoint> agentWarningStatDataPointList) {
-        Map<Long, List<AgentWarningStatDataPoint>> partitions = new HashMap<>();
+        if (CollectionUtils.isEmpty(agentWarningStatDataPointList)) {
+            return Collections.emptyMap();
+        }
 
-        if (CollectionUtils.hasLength(agentWarningStatDataPointList)) {
-            for (AgentWarningStatDataPoint agentWarningStatDataPoint : agentWarningStatDataPointList) {
-                long startTimestamp = agentWarningStatDataPoint.getStartTimestamp();
-                List<AgentWarningStatDataPoint> partition = partitions.computeIfAbsent(startTimestamp, k -> new ArrayList<>());
-                partition.add(agentWarningStatDataPoint);
-            }
+        Map<Long, List<AgentWarningStatDataPoint>> partitions = new HashMap<>();
+        for (AgentWarningStatDataPoint agentWarningStatDataPoint : agentWarningStatDataPointList) {
+            long startTimestamp = agentWarningStatDataPoint.getStartTimestamp();
+            List<AgentWarningStatDataPoint> partition = partitions.computeIfAbsent(startTimestamp, k -> new ArrayList<>());
+            partition.add(agentWarningStatDataPoint);
         }
         return partitions;
     }
 
     private List<AgentStatusTimelineSegment> createTimelineSegment(List<AgentWarningStatDataPoint> agentWarningStatDataPointList) {
-        agentWarningStatDataPointList.sort(new Comparator<AgentWarningStatDataPoint>() {
-            @Override
-            public int compare(AgentWarningStatDataPoint o1, AgentWarningStatDataPoint o2) {
-                int eventTimestampComparison = Long.compare(o1.getTimestamp(), o2.getTimestamp());
-                return eventTimestampComparison;
-            }
-        });
-
+        agentWarningStatDataPointList.sort(Comparator.comparingLong(AgentWarningStatDataPoint::getTimestamp));
         return createTimelineSegment0(agentWarningStatDataPointList);
     }
 
@@ -144,8 +135,11 @@ public class AgentWarningStatServiceImpl implements AgentWarningStatService {
             return null;
         }
 
-        AgentWarningStatDataPoint first = ListUtils.getFirst(agentWarningStatDataPointList);
-        AgentWarningStatDataPoint last = ListUtils.getLast(agentWarningStatDataPointList);
+        AgentWarningStatDataPoint first = CollectionUtils.firstElement(agentWarningStatDataPointList);
+        AgentWarningStatDataPoint last = CollectionUtils.lastElement(agentWarningStatDataPointList);
+        if(first == null || last == null) {
+            return null;
+        }
 
         AgentStatusTimelineSegment timelineSegment = new AgentStatusTimelineSegment();
         timelineSegment.setStartTimestamp(first.getTimestamp());

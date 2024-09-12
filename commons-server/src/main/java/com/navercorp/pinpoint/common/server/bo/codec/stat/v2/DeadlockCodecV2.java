@@ -27,19 +27,18 @@ import com.navercorp.pinpoint.common.server.bo.codec.stat.strategy.StrategyAnaly
 import com.navercorp.pinpoint.common.server.bo.codec.stat.strategy.UnsignedIntegerEncodingStrategy;
 import com.navercorp.pinpoint.common.server.bo.codec.strategy.EncodingStrategy;
 import com.navercorp.pinpoint.common.server.bo.stat.DeadlockThreadCountBo;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.util.Assert;
+
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author Taejin Koo
  */
-@Component("deadlockCodecV2")
+@Component
 public class DeadlockCodecV2 extends AgentStatCodecV2<DeadlockThreadCountBo> {
 
-    @Autowired
     public DeadlockCodecV2(AgentStatDataPointCodec codec) {
         super(new DeadlockCodecFactory(codec));
     }
@@ -50,8 +49,7 @@ public class DeadlockCodecV2 extends AgentStatCodecV2<DeadlockThreadCountBo> {
         private final AgentStatDataPointCodec codec;
 
         private DeadlockCodecFactory(AgentStatDataPointCodec codec) {
-            Assert.notNull(codec, "codec must not be null");
-            this.codec = codec;
+            this.codec = Objects.requireNonNull(codec, "codec");
         }
 
         @Override
@@ -76,8 +74,7 @@ public class DeadlockCodecV2 extends AgentStatCodecV2<DeadlockThreadCountBo> {
         private final UnsignedIntegerEncodingStrategy.Analyzer.Builder deadlockedThreadCountAnalyzerBuilder = new UnsignedIntegerEncodingStrategy.Analyzer.Builder();
 
         private DeadlockCodecEncoder(AgentStatDataPointCodec codec) {
-            Assert.notNull(codec, "codec must not be null");
-            this.codec = codec;
+            this.codec = Objects.requireNonNull(codec, "codec");
         }
 
         @Override
@@ -109,8 +106,7 @@ public class DeadlockCodecV2 extends AgentStatCodecV2<DeadlockThreadCountBo> {
         private List<Integer> deadlockedThreadCountList;
 
         public DeadlockCodecDecoder(AgentStatDataPointCodec codec) {
-            Assert.notNull(codec, "codec must not be null");
-            this.codec = codec;
+            this.codec = Objects.requireNonNull(codec, "codec");
         }
 
         @Override

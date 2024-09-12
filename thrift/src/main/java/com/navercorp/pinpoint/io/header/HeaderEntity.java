@@ -17,20 +17,19 @@ package com.navercorp.pinpoint.io.header;
 
 import java.util.Collections;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * @author minwoo.jung
  */
 public class HeaderEntity {
 
-    public static final HeaderEntity EMPTY_HEADER_ENTITY = new HeaderEntity(Collections.<String, String>emptyMap());
+    public static final HeaderEntity EMPTY_HEADER_ENTITY = new HeaderEntity(Collections.emptyMap());
 
     private final Map<String, String> entity;
 
     public HeaderEntity(Map<String, String> headerEntityData) {
-        if (headerEntityData == null) {
-            throw new NullPointerException("headerEntityData must not be null.");
-        }
+        Objects.requireNonNull(headerEntityData, "headerEntityData");
 
         this.entity = Collections.unmodifiableMap(headerEntityData);
     }

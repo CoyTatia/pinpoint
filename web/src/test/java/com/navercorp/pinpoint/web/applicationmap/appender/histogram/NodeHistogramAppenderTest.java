@@ -16,39 +16,50 @@
 
 package com.navercorp.pinpoint.web.applicationmap.appender.histogram;
 
+import com.google.common.util.concurrent.MoreExecutors;
+import com.navercorp.pinpoint.common.server.util.time.Range;
 import com.navercorp.pinpoint.common.trace.HistogramSlot;
 import com.navercorp.pinpoint.common.trace.ServiceType;
 import com.navercorp.pinpoint.common.trace.ServiceTypeFactory;
 import com.navercorp.pinpoint.common.trace.ServiceTypeProperty;
-import com.navercorp.pinpoint.web.applicationmap.link.CreateType;
-import com.navercorp.pinpoint.web.applicationmap.link.Link;
-import com.navercorp.pinpoint.web.applicationmap.link.LinkList;
-import com.navercorp.pinpoint.web.applicationmap.nodes.Node;
-import com.navercorp.pinpoint.web.applicationmap.nodes.NodeList;
 import com.navercorp.pinpoint.web.applicationmap.appender.histogram.datasource.WasNodeHistogramDataSource;
 import com.navercorp.pinpoint.web.applicationmap.histogram.Histogram;
 import com.navercorp.pinpoint.web.applicationmap.histogram.NodeHistogram;
+import com.navercorp.pinpoint.web.applicationmap.link.Link;
+import com.navercorp.pinpoint.web.applicationmap.link.LinkDirection;
+import com.navercorp.pinpoint.web.applicationmap.link.LinkList;
+import com.navercorp.pinpoint.web.applicationmap.nodes.Node;
+import com.navercorp.pinpoint.web.applicationmap.nodes.NodeList;
 import com.navercorp.pinpoint.web.applicationmap.rawdata.LinkCallDataMap;
 import com.navercorp.pinpoint.web.vo.Application;
-import com.navercorp.pinpoint.web.vo.Range;
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.Before;
-import org.junit.Test;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
+import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verifyZeroInteractions;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
  * @author HyunGil Jeong
  */
 public class NodeHistogramAppenderTest {
+
+    private final Logger logger = LogManager.getLogger(getClass());
 
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
 
@@ -58,37 +69,31 @@ public class NodeHistogramAppenderTest {
 
     private NodeHistogramAppender nodeHistogramAppender;
 
-    @Before
+    private long buildTimeoutMillis = 1000;
+
+    @BeforeEach
     public void setUp() {
         wasNodeHistogramDataSource = mock(WasNodeHistogramDataSource.class);
         NodeHistogramFactory nodeHistogramFactory = new DefaultNodeHistogramFactory(wasNodeHistogramDataSource);
         nodeHistogramAppender = nodeHistogramAppenderFactory.create(nodeHistogramFactory);
     }
 
-    @After
+    @AfterEach
     public void cleanUp() {
-        executor.shutdown();
-        try {
-            if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
-                executor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            executor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
+        MoreExecutors.shutdownAndAwaitTermination(executor, Duration.ofSeconds(3));
     }
 
     @Test
     public void emptyNodeList() {
         // Given
-        Range range = new Range(0, 60 * 1000);
+        Range range = Range.between(0, 60 * 1000);
         NodeList nodeList = new NodeList();
         LinkList linkList = new LinkList();
         // When
-        nodeHistogramAppender.appendNodeHistogram(range, nodeList, linkList);
+        nodeHistogramAppender.appendNodeHistogram(range, nodeList, linkList, buildTimeoutMillis);
         // Then
-        Assert.assertTrue(nodeList.getNodeList().isEmpty());
-        verifyZeroInteractions(wasNodeHistogramDataSource);
+        assertThat(nodeList.getNodeList()).isEmpty();
+        verifyNoInteractions(wasNodeHistogramDataSource);
     }
 
     /**
@@ -97,19 +102,19 @@ public class NodeHistogramAppenderTest {
     @Test
     public void wasNode() {
         // Given
-        Range range = new Range(0, 60 * 1000);
+        Range range = Range.between(0, 60 * 1000);
         NodeList nodeList = new NodeList();
         LinkList linkList = new LinkList();
         Node node = createNode("testApp", ServiceTypeFactory.of(1000, "WAS"));
         nodeList.addNode(node);
 
-        NodeHistogram nodeHistogram = new NodeHistogram(node.getApplication(), range);
+        NodeHistogram nodeHistogram = NodeHistogram.empty(node.getApplication(), range);
         when(wasNodeHistogramDataSource.createNodeHistogram(node.getApplication(), range)).thenReturn(nodeHistogram);
         // When
-        nodeHistogramAppender.appendNodeHistogram(range, nodeList, linkList);
+        nodeHistogramAppender.appendNodeHistogram(range, nodeList, linkList, buildTimeoutMillis);
         // Then
         Node actualNode = nodeList.getNodeList().iterator().next();
-        Assert.assertSame(nodeHistogram, actualNode.getNodeHistogram());
+        Assertions.assertSame(nodeHistogram, actualNode.getNodeHistogram());
     }
 
     /**
@@ -121,7 +126,7 @@ public class NodeHistogramAppenderTest {
     @Test
     public void terminalNode() {
         // Given
-        Range range = new Range(0, 60 * 1000);
+        Range range = Range.between(0, 60 * 1000);
         NodeList nodeList = new NodeList();
         LinkList linkList = new LinkList();
 
@@ -133,7 +138,7 @@ public class NodeHistogramAppenderTest {
         String toNodeAgent = "test-database";
         nodeList.addNode(toNode);
 
-        Link link = new Link(CreateType.Source, fromNode, toNode, range);
+        Link link = new Link(LinkDirection.IN_LINK, fromNode, toNode, range);
         HistogramSlot fastSlot = toNode.getServiceType().getHistogramSchema().getFastSlot();
         HistogramSlot normalSlot = toNode.getServiceType().getHistogramSchema().getNormalSlot();
         HistogramSlot slowSlot = toNode.getServiceType().getHistogramSchema().getSlowSlot();
@@ -141,30 +146,30 @@ public class NodeHistogramAppenderTest {
         long fastCallCount = 200L;
         long normalCallCount = 100L;
         long slowCallCount = 75L;
-        link.addSource(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), toNodeAgent, toNode.getServiceType(), fastSlot, fastCallCount));
-        link.addSource(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), toNodeAgent, toNode.getServiceType(), normalSlot, normalCallCount));
-        link.addSource(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), toNodeAgent, toNode.getServiceType(), slowSlot, slowCallCount));
+        link.addInLink(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), toNodeAgent, toNode.getServiceType(), fastSlot, fastCallCount));
+        link.addInLink(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), toNodeAgent, toNode.getServiceType(), normalSlot, normalCallCount));
+        link.addInLink(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), toNodeAgent, toNode.getServiceType(), slowSlot, slowCallCount));
         linkList.addLink(link);
 
         // When
-        nodeHistogramAppender.appendNodeHistogram(range, nodeList, linkList);
+        nodeHistogramAppender.appendNodeHistogram(range, nodeList, linkList, buildTimeoutMillis);
 
         // Then
         Node actualNode = nodeList.getNodeList().iterator().next();
         NodeHistogram nodeHistogram = actualNode.getNodeHistogram();
         // verify application-level histogram
         Histogram applicationHistogram = nodeHistogram.getApplicationHistogram();
-        Assert.assertEquals(fastCallCount, applicationHistogram.getFastCount());
-        Assert.assertEquals(normalCallCount, applicationHistogram.getNormalCount());
-        Assert.assertEquals(slowCallCount, applicationHistogram.getSlowCount());
-        Assert.assertEquals(fastCallCount + normalCallCount + slowCallCount, applicationHistogram.getTotalCount());
+        assertEquals(fastCallCount, applicationHistogram.getFastCount());
+        assertEquals(normalCallCount, applicationHistogram.getNormalCount());
+        assertEquals(slowCallCount, applicationHistogram.getSlowCount());
+        assertEquals(fastCallCount + normalCallCount + slowCallCount, applicationHistogram.getTotalCount());
         // verify agent-level histogram
         Map<String, Histogram> agentHistogramMap = nodeHistogram.getAgentHistogramMap();
         Histogram agentHistogram = agentHistogramMap.get(toNodeAgent);
-        Assert.assertEquals(fastCallCount, agentHistogram.getFastCount());
-        Assert.assertEquals(normalCallCount, agentHistogram.getNormalCount());
-        Assert.assertEquals(slowCallCount, agentHistogram.getSlowCount());
-        Assert.assertEquals(fastCallCount + normalCallCount + slowCallCount, agentHistogram.getTotalCount());
+        assertEquals(fastCallCount, agentHistogram.getFastCount());
+        assertEquals(normalCallCount, agentHistogram.getNormalCount());
+        assertEquals(slowCallCount, agentHistogram.getSlowCount());
+        assertEquals(fastCallCount + normalCallCount + slowCallCount, agentHistogram.getTotalCount());
     }
 
     /**
@@ -176,7 +181,7 @@ public class NodeHistogramAppenderTest {
     @Test
     public void terminalNode_multiple() {
         // Given
-        Range range = new Range(0, 60 * 1000);
+        Range range = Range.between(0, 60 * 1000);
         NodeList nodeList = new NodeList();
         LinkList linkList = new LinkList();
 
@@ -189,36 +194,36 @@ public class NodeHistogramAppenderTest {
         String toNodeAgent2 = "test-database2";
         nodeList.addNode(toNode);
 
-        Link link = new Link(CreateType.Source, fromNode, toNode, range);
+        Link link = new Link(LinkDirection.IN_LINK, fromNode, toNode, range);
         HistogramSlot fastSlot = toNode.getServiceType().getHistogramSchema().getFastSlot();
         HistogramSlot normalSlot = toNode.getServiceType().getHistogramSchema().getNormalSlot();
         // [testApp] test-app -> [testDatabase] test-database1
         long callCount1 = 100L;
-        link.addSource(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), toNodeAgent1, toNode.getServiceType(), fastSlot, callCount1));
+        link.addInLink(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), toNodeAgent1, toNode.getServiceType(), fastSlot, callCount1));
         // [testApp] test-app -> [testDatabase] test-database2
         long callCount2 = 50L;
-        link.addSource(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), toNodeAgent2, toNode.getServiceType(), normalSlot, callCount2));
+        link.addInLink(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), toNodeAgent2, toNode.getServiceType(), normalSlot, callCount2));
         linkList.addLink(link);
 
         // When
-        nodeHistogramAppender.appendNodeHistogram(range, nodeList, linkList);
+        nodeHistogramAppender.appendNodeHistogram(range, nodeList, linkList, buildTimeoutMillis);
 
         // Then
         Node actualNode = nodeList.getNodeList().iterator().next();
         NodeHistogram nodeHistogram = actualNode.getNodeHistogram();
         // verify application-level histogram
         Histogram applicationHistogram = nodeHistogram.getApplicationHistogram();
-        Assert.assertEquals(callCount1, applicationHistogram.getFastCount());
-        Assert.assertEquals(callCount2, applicationHistogram.getNormalCount());
-        Assert.assertEquals(callCount1 + callCount2, applicationHistogram.getTotalCount());
+        assertEquals(callCount1, applicationHistogram.getFastCount());
+        assertEquals(callCount2, applicationHistogram.getNormalCount());
+        assertEquals(callCount1 + callCount2, applicationHistogram.getTotalCount());
         // verify agent-level histogram
         Map<String, Histogram> agentHistogramMap = nodeHistogram.getAgentHistogramMap();
         Histogram agent1Histogram = agentHistogramMap.get(toNodeAgent1);
-        Assert.assertEquals(callCount1, agent1Histogram.getFastCount());
-        Assert.assertEquals(callCount1, agent1Histogram.getTotalCount());
+        assertEquals(callCount1, agent1Histogram.getFastCount());
+        assertEquals(callCount1, agent1Histogram.getTotalCount());
         Histogram agent2Histogram = agentHistogramMap.get(toNodeAgent2);
-        Assert.assertEquals(callCount2, agent2Histogram.getNormalCount());
-        Assert.assertEquals(callCount2, agent2Histogram.getTotalCount());
+        assertEquals(callCount2, agent2Histogram.getNormalCount());
+        assertEquals(callCount2, agent2Histogram.getTotalCount());
     }
 
     /**
@@ -231,7 +236,7 @@ public class NodeHistogramAppenderTest {
     @Test
     public void terminalNodes() {
         // Given
-        Range range = new Range(0, 60 * 1000);
+        Range range = Range.between(0, 60 * 1000);
         NodeList nodeList = new NodeList();
         LinkList linkList = new LinkList();
 
@@ -247,23 +252,23 @@ public class NodeHistogramAppenderTest {
         String cacheNodeAgent = "test-cache";
         nodeList.addNode(cacheNode);
 
-        Link databaseLink = new Link(CreateType.Source, fromNode, databaseNode, range);
+        Link databaseLink = new Link(LinkDirection.IN_LINK, fromNode, databaseNode, range);
         HistogramSlot databaseSlowSlot = databaseNode.getServiceType().getHistogramSchema().getSlowSlot();
         long databaseCallSlowCount = 50L;
-        databaseLink.addSource(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), databaseNodeAgent, databaseNode.getServiceType(), databaseSlowSlot, databaseCallSlowCount));
+        databaseLink.addInLink(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), databaseNodeAgent, databaseNode.getServiceType(), databaseSlowSlot, databaseCallSlowCount));
         linkList.addLink(databaseLink);
 
-        Link cacheLink = new Link(CreateType.Source, fromNode, cacheNode, range);
+        Link cacheLink = new Link(LinkDirection.IN_LINK, fromNode, cacheNode, range);
         HistogramSlot cacheFastSlot = cacheNode.getServiceType().getHistogramSchema().getFastSlot();
         HistogramSlot cacheSlowSlot = cacheNode.getServiceType().getHistogramSchema().getSlowSlot();
         long cacheCallFastCount = 199L;
         long cacheCallSlowCount = 99L;
-        cacheLink.addSource(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), cacheNodeAgent, cacheNode.getServiceType(), cacheFastSlot, cacheCallFastCount));
-        cacheLink.addSource(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), cacheNodeAgent, cacheNode.getServiceType(), cacheSlowSlot, cacheCallSlowCount));
+        cacheLink.addInLink(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), cacheNodeAgent, cacheNode.getServiceType(), cacheFastSlot, cacheCallFastCount));
+        cacheLink.addInLink(createLinkCallDataMap(fromNodeAgent, fromNode.getServiceType(), cacheNodeAgent, cacheNode.getServiceType(), cacheSlowSlot, cacheCallSlowCount));
         linkList.addLink(cacheLink);
 
         // When
-        nodeHistogramAppender.appendNodeHistogram(range, nodeList, linkList);
+        nodeHistogramAppender.appendNodeHistogram(range, nodeList, linkList, buildTimeoutMillis);
 
         // Then
         // Database node
@@ -271,27 +276,27 @@ public class NodeHistogramAppenderTest {
         NodeHistogram databaseNodeHistogram = actualDatabaseNode.getNodeHistogram();
         // verify application-level histogram
         Histogram databaseApplicationHistogram = databaseNodeHistogram.getApplicationHistogram();
-        Assert.assertEquals(databaseCallSlowCount, databaseApplicationHistogram.getSlowCount());
-        Assert.assertEquals(databaseCallSlowCount, databaseApplicationHistogram.getTotalCount());
+        assertEquals(databaseCallSlowCount, databaseApplicationHistogram.getSlowCount());
+        assertEquals(databaseCallSlowCount, databaseApplicationHistogram.getTotalCount());
         // verify agent-level histogram
         Map<String, Histogram> databaseAgentHistogramMap = databaseNodeHistogram.getAgentHistogramMap();
         Histogram databaseAgentHistogram = databaseAgentHistogramMap.get(databaseNodeAgent);
-        Assert.assertEquals(databaseCallSlowCount, databaseAgentHistogram.getSlowCount());
-        Assert.assertEquals(databaseCallSlowCount, databaseAgentHistogram.getTotalCount());
+        assertEquals(databaseCallSlowCount, databaseAgentHistogram.getSlowCount());
+        assertEquals(databaseCallSlowCount, databaseAgentHistogram.getTotalCount());
         // Cache node
         Node actualCacheNode = nodeList.findNode(cacheNode.getApplication());
         NodeHistogram cacheNodeHistogram = actualCacheNode.getNodeHistogram();
         // verify application-level histogram
         Histogram cacheApplicationHistogram = cacheNodeHistogram.getApplicationHistogram();
-        Assert.assertEquals(cacheCallFastCount, cacheApplicationHistogram.getFastCount());
-        Assert.assertEquals(cacheCallSlowCount, cacheApplicationHistogram.getSlowCount());
-        Assert.assertEquals(cacheCallFastCount + cacheCallSlowCount, cacheApplicationHistogram.getTotalCount());
+        assertEquals(cacheCallFastCount, cacheApplicationHistogram.getFastCount());
+        assertEquals(cacheCallSlowCount, cacheApplicationHistogram.getSlowCount());
+        assertEquals(cacheCallFastCount + cacheCallSlowCount, cacheApplicationHistogram.getTotalCount());
         // verify agent-level histogram
         Map<String, Histogram> cacheAgentHistogramMap = cacheNodeHistogram.getAgentHistogramMap();
         Histogram cacheAgentHistogram = cacheAgentHistogramMap.get(cacheNodeAgent);
-        Assert.assertEquals(cacheCallFastCount, cacheAgentHistogram.getFastCount());
-        Assert.assertEquals(cacheCallSlowCount, cacheAgentHistogram.getSlowCount());
-        Assert.assertEquals(cacheCallFastCount + cacheCallSlowCount, cacheAgentHistogram.getTotalCount());
+        assertEquals(cacheCallFastCount, cacheAgentHistogram.getFastCount());
+        assertEquals(cacheCallSlowCount, cacheAgentHistogram.getSlowCount());
+        assertEquals(cacheCallFastCount + cacheCallSlowCount, cacheAgentHistogram.getTotalCount());
     }
 
     /**
@@ -303,7 +308,7 @@ public class NodeHistogramAppenderTest {
     @Test
     public void userNode() {
         // Given
-        Range range = new Range(0, 60 * 1000);
+        Range range = Range.between(0, 60 * 1000);
         NodeList nodeList = new NodeList();
         LinkList linkList = new LinkList();
         // userNode : [userNode] user
@@ -316,29 +321,29 @@ public class NodeHistogramAppenderTest {
         String wasNodeAgent2 = "was-2";
         nodeList.addNode(wasNode);
 
-        Link link = new Link(CreateType.Target, userNode, wasNode, range);
+        Link link = new Link(LinkDirection.OUT_LINK, userNode, wasNode, range);
         HistogramSlot fastSlot = wasNode.getServiceType().getHistogramSchema().getFastSlot();
         HistogramSlot normalSlot = wasNode.getServiceType().getHistogramSchema().getNormalSlot();
         // [userNode] user -> [wasNode] was-1
         long fastCallCount = 100L;
-        link.addTarget(createLinkCallDataMap(userNodeAgent, userNode.getServiceType(), wasNodeAgent1, wasNode.getServiceType(), fastSlot, fastCallCount));
+        link.addOutLink(createLinkCallDataMap(userNodeAgent, userNode.getServiceType(), wasNodeAgent1, wasNode.getServiceType(), fastSlot, fastCallCount));
         // [userNode] user -> [wasNode] was-2
         long normalCallCount = 50L;
-        link.addTarget(createLinkCallDataMap(userNodeAgent, userNode.getServiceType(), wasNodeAgent2, wasNode.getServiceType(), normalSlot, normalCallCount));
+        link.addOutLink(createLinkCallDataMap(userNodeAgent, userNode.getServiceType(), wasNodeAgent2, wasNode.getServiceType(), normalSlot, normalCallCount));
         linkList.addLink(link);
 
         // When
-        nodeHistogramAppender.appendNodeHistogram(range, nodeList, linkList);
+        nodeHistogramAppender.appendNodeHistogram(range, nodeList, linkList, buildTimeoutMillis);
 
         NodeHistogram nodeHistogram = userNode.getNodeHistogram();
         // verify application-level histogram
         Histogram applicationHistogram = nodeHistogram.getApplicationHistogram();
-        Assert.assertEquals(fastCallCount, applicationHistogram.getFastCount());
-        Assert.assertEquals(normalCallCount, applicationHistogram.getNormalCount());
-        Assert.assertEquals(fastCallCount + normalCallCount, applicationHistogram.getTotalCount());
+        assertEquals(fastCallCount, applicationHistogram.getFastCount());
+        assertEquals(normalCallCount, applicationHistogram.getNormalCount());
+        assertEquals(fastCallCount + normalCallCount, applicationHistogram.getTotalCount());
         // verify agent-level histogram - there is none for user node
         Map<String, Histogram> databaseAgentHistogramMap = nodeHistogram.getAgentHistogramMap();
-        Assert.assertTrue(databaseAgentHistogramMap.isEmpty());
+        assertThat(databaseAgentHistogramMap).isEmpty();
     }
 
     private Node createNode(String applicationName, ServiceType serviceType) {
@@ -349,7 +354,47 @@ public class NodeHistogramAppenderTest {
     private LinkCallDataMap createLinkCallDataMap(String fromAgentId, ServiceType fromAgentServiceType, String toAgentId, ServiceType toAgentServiceType, HistogramSlot slot, long callCount) {
         long currentTimestamp = System.currentTimeMillis();
         LinkCallDataMap linkCallDataMap = new LinkCallDataMap();
-        linkCallDataMap.addCallData(fromAgentId, fromAgentServiceType, toAgentId, toAgentServiceType, currentTimestamp, slot.getSlotTime(), callCount);
+        linkCallDataMap.addCallData(new Application(fromAgentId, fromAgentServiceType), new Application(toAgentId, toAgentServiceType), currentTimestamp, slot.getSlotTime(), callCount);
         return linkCallDataMap;
+    }
+
+    @Test
+    public void appendNodeHistogram() throws InterruptedException {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(16);
+        executor.setMaxPoolSize(16);
+        executor.setQueueCapacity(1024);
+
+        int maxCount = 100;
+        @SuppressWarnings("unchecked")
+        CompletableFuture<String>[] array = new CompletableFuture[maxCount];
+        AtomicBoolean timeout = new AtomicBoolean(false);
+        for (int i = 0; i < maxCount; i++) {
+            array[i] = makeCompletableFuture(i, timeout);
+        }
+
+        CompletableFuture<Void> completableFuture = CompletableFuture.allOf(array);
+        try {
+            completableFuture.get(100, TimeUnit.MILLISECONDS);
+        } catch (Exception e) {
+            timeout.set(Boolean.TRUE);
+        }
+        TimeUnit.SECONDS.sleep(3);
+        logger.debug("END");
+    }
+
+    private CompletableFuture<String> makeCompletableFuture(final int sleepMillis, final AtomicBoolean timeout) {
+        return CompletableFuture.supplyAsync(() -> {
+            if (timeout.get()) {
+                logger.debug("Timeout");
+                return "Timeout";
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException ignore) {
+            }
+            logger.debug("RUN {}", sleepMillis);
+            return "Completed";
+        }, executor);
     }
 }

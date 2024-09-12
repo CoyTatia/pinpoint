@@ -16,81 +16,35 @@
 
 package com.navercorp.pinpoint.web.applicationmap.histogram;
 
-import com.navercorp.pinpoint.common.trace.HistogramSchema;
-import com.navercorp.pinpoint.common.trace.ServiceType;
-import com.navercorp.pinpoint.common.trace.SlotType;
-import com.navercorp.pinpoint.web.view.ResponseTimeViewModel;
+import com.navercorp.pinpoint.web.view.TimeViewModel;
 import com.navercorp.pinpoint.web.vo.Application;
-import com.navercorp.pinpoint.web.vo.Range;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.*;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * @author emeroad
  */
 public class ApplicationTimeHistogram {
-
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
-
     private final Application application;
-    private final Range range;
+    private final List<TimeHistogram> histogramList;
 
-    private List<TimeHistogram> histogramList;
-
-    public ApplicationTimeHistogram(Application application, Range range) {
-        this(application, range, Collections.<TimeHistogram>emptyList());
+    public ApplicationTimeHistogram(Application application) {
+        this(application, Collections.emptyList());
     }
 
-    public ApplicationTimeHistogram(Application application, Range range, List<TimeHistogram> histogramList) {
-        if (application == null) {
-            throw new NullPointerException("application must not be null");
-        }
-        if (range == null) {
-            throw new NullPointerException("range must not be null");
-        }
-        if (histogramList == null) {
-            throw new NullPointerException("histogramList must not be null");
-        }
-        this.application = application;
-        this.range = range;
-        this.histogramList = histogramList;
+    public ApplicationTimeHistogram(Application application, List<TimeHistogram> histogramList) {
+        this.application = Objects.requireNonNull(application, "application");
+        this.histogramList = Objects.requireNonNull(histogramList, "histogramList");
     }
 
-    public List<ResponseTimeViewModel> createViewModel() {
-        final List<ResponseTimeViewModel> value = new ArrayList<>(5);
-        ServiceType serviceType = application.getServiceType();
-        HistogramSchema schema = serviceType.getHistogramSchema();
-        value.add(new ResponseTimeViewModel(schema.getFastSlot().getSlotName(), getColumnValue(SlotType.FAST)));
-//        value.add(new ResponseTimeViewModel(schema.getFastErrorSlot().getSlotName(), getColumnValue(SlotType.FAST_ERROR)));
-        value.add(new ResponseTimeViewModel(schema.getNormalSlot().getSlotName(), getColumnValue(SlotType.NORMAL)));
-//        value.add(new ResponseTimeViewModel(schema.getNormalErrorSlot().getSlotName(), getColumnValue(SlotType.NORMAL_ERROR)));
-        value.add(new ResponseTimeViewModel(schema.getSlowSlot().getSlotName(), getColumnValue(SlotType.SLOW)));
-//        value.add(new ResponseTimeViewModel(schema.getSlowErrorSlot().getSlotName(), getColumnValue(SlotType.SLOW_ERROR)));
-        value.add(new ResponseTimeViewModel(schema.getVerySlowSlot().getSlotName(), getColumnValue(SlotType.VERY_SLOW)));
-//        value.add(new ResponseTimeViewModel(schema.getVerySlowErrorSlot().getSlotName(), getColumnValue(SlotType.VERY_SLOW_ERROR)));
-        value.add(new ResponseTimeViewModel(schema.getErrorSlot().getSlotName(), getColumnValue(SlotType.ERROR)));
-
-        return value;
+    public List<TimeViewModel> createViewModel(TimeHistogramFormat timeHistogramFormat) {
+        TimeViewModel.Builder format = TimeViewModel.newBuilder(timeHistogramFormat);
+        return format.build(application, histogramList);
     }
 
-    public List<ResponseTimeViewModel.TimeCount> getColumnValue(SlotType slotType) {
-        List<ResponseTimeViewModel.TimeCount> result = new ArrayList<>(histogramList.size());
-        for (TimeHistogram timeHistogram : histogramList) {
-            final long timeStamp = timeHistogram.getTimeStamp();
-
-            ResponseTimeViewModel.TimeCount TimeCount = new ResponseTimeViewModel.TimeCount(timeStamp, getCount(timeHistogram, slotType));
-            result.add(TimeCount);
-        }
-        return result;
+    public List<TimeHistogram> getHistogramList() {
+        return histogramList;
     }
-
-
-    public long getCount(TimeHistogram timeHistogram, SlotType slotType) {
-        return timeHistogram.getCount(slotType);
-    }
-
-
 }

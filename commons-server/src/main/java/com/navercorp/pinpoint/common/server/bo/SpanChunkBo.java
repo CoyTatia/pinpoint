@@ -1,6 +1,24 @@
+/*
+ * Copyright 2019 NAVER Corp.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.navercorp.pinpoint.common.server.bo;
 
-import com.navercorp.pinpoint.common.util.TransactionId;
+import com.navercorp.pinpoint.common.profiler.util.TransactionId;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.PositiveOrZero;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -12,9 +30,10 @@ public class SpanChunkBo implements BasicSpan {
 
     private byte version = 0;
 
-    private String agentId;
-    private String applicationId;
-    private long agentStartTime;
+    @NotBlank private String agentId;
+    private String agentName;
+    @NotBlank private String applicationId;
+    @PositiveOrZero private long agentStartTime;
 
     private TransactionId transactionId;
 
@@ -25,7 +44,7 @@ public class SpanChunkBo implements BasicSpan {
     private short serviceType;
     private Short applicationServiceType;
 
-    private List<SpanEventBo> spanEventBoList = new ArrayList<SpanEventBo>();
+    private final List<SpanEventBo> spanEventBoList = new ArrayList<>();
 
     private long collectorAcceptTime;
 
@@ -54,6 +73,15 @@ public class SpanChunkBo implements BasicSpan {
 
     public void setAgentId(String agentId) {
         this.agentId = agentId;
+    }
+
+    @Override
+    public String getAgentName() {
+        return agentName;
+    }
+
+    public void setAgentName(String agentName) {
+        this.agentName = agentName;
     }
 
     @Override
@@ -171,6 +199,7 @@ public class SpanChunkBo implements BasicSpan {
         return "SpanChunkBo{" +
                 "version=" + version +
                 ", agentId='" + agentId + '\'' +
+                ", agentName='" + agentName + '\'' +
                 ", applicationId='" + applicationId + '\'' +
                 ", agentStartTime=" + agentStartTime +
                 ", transactionId=" + transactionId +
@@ -181,7 +210,7 @@ public class SpanChunkBo implements BasicSpan {
                 ", spanEventBoList=" + spanEventBoList +
                 ", collectorAcceptTime=" + collectorAcceptTime +
                 ", localAsyncId=" + localAsyncId +
-                ", keyTIme=" + keyTime +
+                ", keyTime=" + keyTime +
                 '}';
     }
 }

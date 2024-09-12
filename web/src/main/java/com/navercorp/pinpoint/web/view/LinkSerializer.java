@@ -16,22 +16,25 @@
 
 package com.navercorp.pinpoint.web.view;
 
-import com.navercorp.pinpoint.web.applicationmap.link.Link;
-import com.navercorp.pinpoint.web.applicationmap.link.LinkType;
-import com.navercorp.pinpoint.web.applicationmap.nodes.Node;
-import com.navercorp.pinpoint.web.applicationmap.nodes.ServerInstanceList;
-import com.navercorp.pinpoint.web.applicationmap.histogram.Histogram;
-import com.navercorp.pinpoint.web.applicationmap.rawdata.AgentHistogram;
-import com.navercorp.pinpoint.web.applicationmap.rawdata.AgentHistogramList;
-import com.navercorp.pinpoint.web.vo.Application;
 import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.SerializerProvider;
+import com.navercorp.pinpoint.common.server.util.json.JsonFields;
+import com.navercorp.pinpoint.web.applicationmap.histogram.Histogram;
+import com.navercorp.pinpoint.web.applicationmap.link.Link;
+import com.navercorp.pinpoint.web.applicationmap.link.LinkViews;
+import com.navercorp.pinpoint.web.applicationmap.nodes.Node;
+import com.navercorp.pinpoint.web.applicationmap.nodes.ServerGroupList;
+import com.navercorp.pinpoint.web.applicationmap.rawdata.AgentHistogram;
+import com.navercorp.pinpoint.web.applicationmap.rawdata.AgentHistogramList;
+import com.navercorp.pinpoint.web.view.id.AgentNameView;
+import com.navercorp.pinpoint.web.vo.Application;
+import com.navercorp.pinpoint.web.vo.ResponseTimeStatics;
 
 import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author emeroad
@@ -41,17 +44,21 @@ import java.util.List;
 public class LinkSerializer extends JsonSerializer<Link> {
 
     @Override
-    public void serialize(Link link, JsonGenerator jgen, SerializerProvider provider) throws IOException, JsonProcessingException {
+    public void serialize(Link link, JsonGenerator jgen, SerializerProvider provider) throws IOException {
         jgen.writeStartObject();
 
-        jgen.writeStringField("key", link.getLinkName());  // for servermap
+        jgen.writeObjectField("key", link.getLinkName());  // for servermap
 
-        jgen.writeStringField("from", link.getFrom().getNodeName());  // necessary for go.js
-        jgen.writeStringField("to", link.getTo().getNodeName()); // necessary for go.js
+        jgen.writeObjectField("from", link.getFrom().getNodeName());  // necessary for go.js
+        jgen.writeObjectField("to", link.getTo().getNodeName()); // necessary for go.js
 
         // for FilterWizard. from, to agent mapping data
         writeAgentId("fromAgent", link.getFrom(), jgen);
         writeAgentId("toAgent", link.getTo(), jgen);
+
+        //for FilterWizard. show agent name as tooltip on instance
+        writeAgentIdNameMap("fromAgentIdNameMap", link.getFrom(), jgen);
+        writeAgentIdNameMap("toAgentIdNameMap", link.getTo(), jgen);
 
         writeSimpleNode("sourceInfo", link.getFrom(), jgen);
         writeSimpleNode("targetInfo", link.getTo(), jgen);
@@ -69,15 +76,25 @@ public class LinkSerializer extends JsonSerializer<Link> {
         jgen.writeNumberField("errorCount", histogram.getTotalErrorCount());
         jgen.writeNumberField("slowCount", histogram.getSlowCount());
 
+        ResponseTimeStatics responseTimeStatics = ResponseTimeStatics.fromHistogram(histogram);
+        jgen.writeObjectField(ResponseTimeStatics.RESPONSE_STATISTICS, responseTimeStatics);
+
 
         jgen.writeObjectField("histogram", histogram);
-        writeTimeSeriesHistogram(link, jgen);
+        final Class<?> activeView = LinkViews.getActiveView(provider);
+        //time histogram
+        if (!LinkViews.Simplified.inView(activeView)){
+            writeTimeSeriesHistogram(link, jgen);
+        }
 
-        if (LinkType.DETAILED == link.getLinkType()) {
+        //agent histogram
+        if (LinkViews.Detailed.inView(activeView)) {
             // data showing how agents call each of their respective links
             writeAgentHistogram("sourceHistogram", link.getSourceList(), jgen);
             writeAgentHistogram("targetHistogram", link.getTargetList(), jgen);
             writeSourceAgentTimeSeriesHistogram(link, jgen);
+            writeAgentResponseStatistics("sourceResponseStatistics", link.getSourceList(), jgen);
+            writeAgentResponseStatistics("targetResponseStatistics", link.getTargetList(), jgen);
         }
 
 //        String state = link.getLinkState();
@@ -91,13 +108,27 @@ public class LinkSerializer extends JsonSerializer<Link> {
         if (node.getServiceType().isWas()) {
             jgen.writeFieldName(fieldName);
             jgen.writeStartArray();
-            ServerInstanceList serverInstanceList = node.getServerInstanceList();
-            if (serverInstanceList!= null) {
-                for (String agentId : serverInstanceList.getAgentIdList()) {
+            ServerGroupList serverGroupList = node.getServerGroupList();
+            if (serverGroupList != null) {
+                for (String agentId : serverGroupList.getAgentIdList()) {
                     jgen.writeObject(agentId);
                 }
             }
             jgen.writeEndArray();
+        }
+    }
+
+    private void writeAgentIdNameMap(String fieldName, Node node, JsonGenerator jgen) throws IOException {
+        if (node.getServiceType().isWas()) {
+            jgen.writeFieldName(fieldName);
+            jgen.writeStartObject();
+            ServerGroupList serverGroupList = node.getServerGroupList();
+            if (serverGroupList != null) {
+                for (Map.Entry<String, String> entry : serverGroupList.getAgentIdNameMap().entrySet()) {
+                    jgen.writeStringField(entry.getKey(), entry.getValue());
+                }
+            }
+            jgen.writeEndObject();
         }
     }
 
@@ -116,15 +147,21 @@ public class LinkSerializer extends JsonSerializer<Link> {
 
     }
 
-
-
     private void writeTimeSeriesHistogram(Link link, JsonGenerator jgen) throws IOException {
-        List<ResponseTimeViewModel> sourceApplicationTimeSeriesHistogram = link.getLinkApplicationTimeSeriesHistogram();
-
+        List<TimeViewModel> sourceApplicationTimeSeriesHistogram = link.getLinkApplicationTimeSeriesHistogram();
         jgen.writeFieldName("timeSeriesHistogram");
         jgen.writeObject(sourceApplicationTimeSeriesHistogram);
     }
 
+    private void writeAgentResponseStatistics(String fieldName, AgentHistogramList agentHistogramList, JsonGenerator jgen) throws IOException {
+        jgen.writeFieldName(fieldName);
+        jgen.writeStartObject();
+        for (AgentHistogram agentHistogram : agentHistogramList.getAgentHistogramList()) {
+            jgen.writeFieldName(agentHistogram.getId());
+            jgen.writeObject(ResponseTimeStatics.fromHistogram(agentHistogram.getHistogram()));
+        }
+        jgen.writeEndObject();
+    }
 
     private void writeAgentHistogram(String fieldName, AgentHistogramList agentHistogramList, JsonGenerator jgen) throws IOException {
         jgen.writeFieldName(fieldName);
@@ -137,8 +174,9 @@ public class LinkSerializer extends JsonSerializer<Link> {
     }
 
     private void writeSourceAgentTimeSeriesHistogram(Link link, JsonGenerator jgen) throws IOException {
-        AgentResponseTimeViewModelList sourceAgentTimeSeriesHistogram = link.getSourceAgentTimeSeriesHistogram();
-        sourceAgentTimeSeriesHistogram.setFieldName("sourceTimeSeriesHistogram");
+        JsonFields<AgentNameView, List<TimeViewModel>> sourceAgentTimeSeriesHistogram = link.getSourceAgentTimeSeriesHistogram();
+//        sourceAgentTimeSeriesHistogram.setFieldName("sourceTimeSeriesHistogram");
+        jgen.writeFieldName("sourceTimeSeriesHistogram");
         jgen.writeObject(sourceAgentTimeSeriesHistogram);
     }
 

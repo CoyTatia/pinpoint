@@ -17,14 +17,10 @@
 package com.navercorp.pinpoint.web.view;
 
 import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.SerializerProvider;
-import com.navercorp.pinpoint.loader.service.ServiceTypeRegistryService;
 import com.navercorp.pinpoint.common.trace.ServiceType;
-import com.navercorp.pinpoint.common.server.util.AgentLifeCycleState;
 import com.navercorp.pinpoint.web.applicationmap.nodes.ServerInstance;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -36,47 +32,24 @@ import java.io.IOException;
 @Component
 public class ServerInstanceSerializer extends JsonSerializer<ServerInstance> {
 
-    @Autowired
-    private ServiceTypeRegistryService serviceTypeRegistryService;
-
-    @Autowired
-    private AgentLifeCycleStateSerializer agentLifeCycleStateSerializer;
 
     public ServerInstanceSerializer() {
     }
 
-    // for Test
-    @Deprecated
-    void setServiceTypeRegistryService(ServiceTypeRegistryService serviceTypeRegistryService) {
-        this.serviceTypeRegistryService = serviceTypeRegistryService;
-    }
-
-    // for Test
-    @Deprecated
-    void setAgentLifeCycleStateSerializer(AgentLifeCycleStateSerializer agentLifeCycleStateSerializer) {
-        this.agentLifeCycleStateSerializer = agentLifeCycleStateSerializer;
-    }
-
     @Override
-    public void serialize(ServerInstance serverInstance, JsonGenerator jgen, SerializerProvider provider) throws IOException, JsonProcessingException {
+    public void serialize(ServerInstance serverInstance, JsonGenerator jgen, SerializerProvider provider) throws IOException {
 
         jgen.writeStartObject();
-        final short serviceTypeCode = serverInstance.getServiceTypeCode();
-        final ServiceType serviceType = serviceTypeRegistryService.findServiceType(serviceTypeCode);
 
+        final ServiceType serviceType = serverInstance.getServiceType();
         jgen.writeBooleanField("hasInspector", hasInspector(serviceType));
         jgen.writeStringField("name", serverInstance.getName());
+        jgen.writeStringField("agentName", serverInstance.getAgentName());
         jgen.writeStringField("serviceType", serviceType.getName());
 
-        jgen.writeFieldName("status");
-        write(serverInstance.getStatus(), jgen, provider);
-
+        jgen.writeObjectField("status", serverInstance.getStatus());
         jgen.writeEndObject();
 
-    }
-
-    public void write(AgentLifeCycleState value, JsonGenerator jgen, SerializerProvider provider) throws IOException, JsonProcessingException {
-        this.agentLifeCycleStateSerializer.serialize(value, jgen, provider);
     }
 
 
@@ -87,6 +60,5 @@ public class ServerInstanceSerializer extends JsonSerializer<ServerInstance> {
             return false;
         }
     }
-
 
 }

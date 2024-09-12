@@ -17,14 +17,12 @@
 package com.navercorp.pinpoint.rpc.server;
 
 import com.navercorp.pinpoint.common.util.ArrayUtils;
-import com.navercorp.pinpoint.common.util.Assert;
 import com.navercorp.pinpoint.common.util.IdValidateUtils;
 import com.navercorp.pinpoint.common.util.StringUtils;
 import com.navercorp.pinpoint.rpc.client.HandshakerFactory;
 import com.navercorp.pinpoint.rpc.packet.HandshakePropertyType;
 import com.navercorp.pinpoint.rpc.util.MapUtils;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -64,7 +62,7 @@ public class ChannelPropertiesFactory {
         }
         final String applicationName = MapUtils.getString(properties, HandshakePropertyType.APPLICATION_NAME.getName());
         if (!IdValidateUtils.validateId(applicationName)) {
-            throw new IllegalArgumentException("Invalid applicationName :" + agentId);
+            throw new IllegalArgumentException("Invalid applicationName :" + applicationName);
         }
         final String hostName = MapUtils.getString(properties, HandshakePropertyType.HOSTNAME.getName());
         final String ip = MapUtils.getString(properties, HandshakePropertyType.IP.getName());
@@ -86,7 +84,7 @@ public class ChannelPropertiesFactory {
         if (ArrayUtils.isEmpty(customKey)) {
             return Collections.emptyMap();
         }
-        final Map<Object, Object> copy = new HashMap<Object, Object>();
+        final Map<Object, Object> copy = new HashMap<>();
         for (Object key : customKey) {
             final Object value = properties.get(key);
             if (value != null) {

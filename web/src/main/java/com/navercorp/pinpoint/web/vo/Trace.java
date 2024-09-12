@@ -16,28 +16,38 @@
 
 package com.navercorp.pinpoint.web.vo;
 
+import com.navercorp.pinpoint.common.profiler.util.TransactionId;
+import com.navercorp.pinpoint.common.server.bo.SpanBo;
+
+import java.util.Objects;
+
 /**
  * @author emeroad
  */
 public class Trace {
 
-    private final String transactionId;
+    private final TransactionId transactionId;
     private final long executionTime;
     private final long startTime;
 
     private final int exceptionCode;
 
-    public Trace(String transactionId, long executionTime, long startTime, int exceptionCode) {
-        if (transactionId == null) {
-            throw new NullPointerException("transactionId must not be null");
-        }
-        this.transactionId = transactionId;
+    public static Trace of(SpanBo span) {
+        final TransactionId transactionId = span.getTransactionId();
+        final long elapsed = span.getElapsed();
+        final long collectorAcceptTime = span.getCollectorAcceptTime();
+        final int errCode = span.getErrCode();
+        return new Trace(transactionId, elapsed, collectorAcceptTime, errCode);
+    }
+
+    public Trace(TransactionId transactionId, long executionTime, long startTime, int exceptionCode) {
+        this.transactionId = Objects.requireNonNull(transactionId, "transactionId");
         this.executionTime = executionTime;
         this.startTime = startTime;
         this.exceptionCode = exceptionCode;
     }
 
-    public String getTransactionId() {
+    public TransactionId getTransactionId() {
         return transactionId;
     }
 

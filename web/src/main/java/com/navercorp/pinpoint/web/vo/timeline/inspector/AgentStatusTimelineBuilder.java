@@ -18,10 +18,10 @@ package com.navercorp.pinpoint.web.vo.timeline.inspector;
 
 import com.navercorp.pinpoint.common.server.util.AgentEventType;
 import com.navercorp.pinpoint.common.server.util.AgentEventTypeCategory;
+import com.navercorp.pinpoint.common.server.util.time.Range;
 import com.navercorp.pinpoint.web.filter.agent.AgentEventFilter;
 import com.navercorp.pinpoint.web.vo.AgentEvent;
-import com.navercorp.pinpoint.web.vo.AgentStatus;
-import com.navercorp.pinpoint.web.vo.Range;
+import com.navercorp.pinpoint.web.vo.agent.AgentStatus;
 import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
 
@@ -32,6 +32,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Queue;
 
@@ -72,8 +73,8 @@ public class AgentStatusTimelineBuilder {
     }
 
     public AgentStatusTimelineBuilder(Range range, AgentStatus initialStatus, List<AgentEvent> agentEvents, List<AgentStatusTimelineSegment> warningStatusTimelineSegmentList) {
-        Assert.notNull(range, "range must not be null");
-        Assert.isTrue(range.getRange() > 0, "timeline must have range greater than 0");
+        Objects.requireNonNull(range, "range");
+        Assert.isTrue(range.durationMillis() > 0, "timeline must have range greater than 0");
         timelineStartTimestamp = range.getFrom();
         timelineEndTimestamp = range.getTo();
         if (initialStatus == null) {
@@ -298,12 +299,8 @@ public class AgentStatusTimelineBuilder {
 
     private static class AgentLifeCycle {
 
-        private static final Comparator<AgentLifeCycle> START_TIMESTAMP_ASC_COMPARATOR = new Comparator<AgentLifeCycle>() {
-            @Override
-            public int compare(AgentLifeCycle o1, AgentLifeCycle o2) {
-                return Long.compare(o1.getStartTimestamp(), o2.getStartTimestamp());
-            }
-        };
+        private static final Comparator<AgentLifeCycle> START_TIMESTAMP_ASC_COMPARATOR
+                = Comparator.comparingLong(AgentLifeCycle::getStartTimestamp);
 
         private final long startTimestamp;
         private final long endTimestamp;

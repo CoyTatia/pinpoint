@@ -27,6 +27,7 @@ public class DataSourceBo implements AgentStatDataPoint {
     public static final String UNCOLLECTED_STRING_VALUE = "";
     public static final ServiceType UNCOLLECTED_SERVICE_TYPE_VALUE = ServiceType.UNKNOWN;
 
+    private String applicationName;
     private String agentId;
     private long startTimestamp;
     private long timestamp;
@@ -71,6 +72,16 @@ public class DataSourceBo implements AgentStatDataPoint {
     @Override
     public AgentStatType getAgentStatType() {
         return AgentStatType.DATASOURCE;
+    }
+
+    @Override
+    public String getApplicationName() {
+        return this.applicationName;
+    }
+
+    @Override
+    public void setApplicationName(String applicationName) {
+        this.applicationName = applicationName;
     }
 
     public int getId() {
@@ -156,18 +167,16 @@ public class DataSourceBo implements AgentStatDataPoint {
 
     @Override
     public String toString() {
-        final StringBuilder sb = new StringBuilder("DataSourceBo{");
-        sb.append("agentId='").append(agentId).append('\'');
-        sb.append(", startTimestamp=").append(startTimestamp);
-        sb.append(", timestamp=").append(timestamp);
-        sb.append(", id=").append(id);
-        sb.append(", serviceTypeCode=").append(serviceTypeCode);
-        sb.append(", databaseName='").append(databaseName).append('\'');
-        sb.append(", jdbcUrl='").append(jdbcUrl).append('\'');
-        sb.append(", activeConnectionSize=").append(activeConnectionSize);
-        sb.append(", maxConnectionSize=").append(maxConnectionSize);
-        sb.append('}');
-        return sb.toString();
+        return "DataSourceBo{" +
+                "agentId='" + agentId + '\'' +
+                ", startTimestamp=" + startTimestamp +
+                ", timestamp=" + timestamp +
+                ", id=" + id +
+                ", serviceTypeCode=" + serviceTypeCode +
+                ", databaseName='" + databaseName + '\'' +
+                ", jdbcUrl='" + jdbcUrl + '\'' +
+                ", activeConnectionSize=" + activeConnectionSize +
+                ", maxConnectionSize=" + maxConnectionSize +
+                '}';
     }
-
 }

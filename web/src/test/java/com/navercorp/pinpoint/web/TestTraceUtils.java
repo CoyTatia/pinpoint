@@ -1,11 +1,11 @@
 /*
- * Copyright 2017 NAVER Corp.
+ * Copyright 2019 NAVER Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,8 +21,9 @@ import com.navercorp.pinpoint.common.server.bo.SpanBo;
 import com.navercorp.pinpoint.common.server.bo.SpanEventBo;
 import com.navercorp.pinpoint.loader.service.ServiceTypeRegistryService;
 import com.navercorp.pinpoint.common.trace.ServiceType;
-import com.navercorp.pinpoint.common.util.TransactionId;
+import com.navercorp.pinpoint.common.profiler.util.TransactionId;
 import com.navercorp.pinpoint.web.util.ServiceTypeRegistryMockFactory;
+import org.assertj.core.matcher.AssertionMatcher;
 
 import java.util.Map;
 import java.util.Random;
@@ -33,6 +34,7 @@ import static com.navercorp.pinpoint.common.trace.ServiceTypeProperty.INCLUDE_DE
 import static com.navercorp.pinpoint.common.trace.ServiceTypeProperty.QUEUE;
 import static com.navercorp.pinpoint.common.trace.ServiceTypeProperty.RECORD_STATISTICS;
 import static com.navercorp.pinpoint.common.trace.ServiceTypeProperty.TERMINAL;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * @author HyunGil Jeong
@@ -241,5 +243,14 @@ public class TestTraceUtils {
         public BackEndSpanEventBuilder(String destinationId, String endPoint, int startElapsed, int endElapsed) {
             super(BACKEND_TYPE_CODE, destinationId, endPoint, startElapsed, endElapsed);
         }
+    }
+
+    public static <K> AssertionMatcher<Map<K, ?>> hasKey(K key) {
+        return new AssertionMatcher<>() {
+            @Override
+            public void assertion(Map<K, ?> map) throws AssertionError {
+                assertThat(map).containsKey(key);
+            }
+        };
     }
 }

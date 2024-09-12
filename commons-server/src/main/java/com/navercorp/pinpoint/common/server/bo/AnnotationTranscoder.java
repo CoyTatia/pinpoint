@@ -20,8 +20,10 @@ package com.navercorp.pinpoint.common.server.bo;
 import com.navercorp.pinpoint.common.buffer.AutomaticBuffer;
 import com.navercorp.pinpoint.common.buffer.Buffer;
 import com.navercorp.pinpoint.common.buffer.FixedBuffer;
-import com.navercorp.pinpoint.common.util.BitFieldUtils;
+import com.navercorp.pinpoint.common.profiler.encoding.BitFieldUtils;
+import com.navercorp.pinpoint.common.util.BytesStringStringValue;
 import com.navercorp.pinpoint.common.util.BytesUtils;
+import com.navercorp.pinpoint.common.util.DataType;
 import com.navercorp.pinpoint.common.util.IntBooleanIntBooleanValue;
 import com.navercorp.pinpoint.common.util.IntStringStringValue;
 import com.navercorp.pinpoint.common.util.IntStringValue;
@@ -56,6 +58,7 @@ public class AnnotationTranscoder {
     static final byte CODE_LONG_INT_INT_BYTE_BYTE_STRING = 22;
     static final byte CODE_INT_BOOLEAN_INT_BOOLEAN = 23;
     static final byte CODE_STRING_STRING = 24;
+    static final byte CODE_BYTES_STRING_STRING = 25;
 
     private static final byte[] EMPTY_BYTE_ARRAY = new byte[0];
 
@@ -99,6 +102,8 @@ public class AnnotationTranscoder {
                 return decodeLongIntIntByteByteStringValue(data);
             case CODE_INT_BOOLEAN_INT_BOOLEAN:
                 return decodeIntBooleanIntBooleanValue(data);
+            case CODE_BYTES_STRING_STRING:
+                return decodeBytesStringStringValue(data);
         }
         throw new IllegalArgumentException("unsupported DataType:" + dataType);
     }
@@ -107,38 +112,46 @@ public class AnnotationTranscoder {
         if (o == null) {
             return CODE_NULL;
         }
+        if (o instanceof Number) {
+            if (o instanceof Long) {
+                return CODE_LONG;
+            } else if (o instanceof Integer) {
+                return CODE_INT;
+            } else if (o instanceof Short) {
+                return CODE_SHORT;
+            } else if (o instanceof Float) {
+                // not supported by thrift
+                return CODE_FLOAT;
+            } else if (o instanceof Double) {
+                return CODE_DOUBLE;
+            } else if (o instanceof Byte) {
+                return CODE_BYTE;
+            }
+        }
         if (o instanceof String) {
             return CODE_STRING;
-        } else if (o instanceof Long) {
-            return CODE_LONG;
-        } else if (o instanceof Integer) {
-            return CODE_INT;
         } else if (o instanceof Boolean) {
             if (Boolean.TRUE.equals(o)) {
                 return CODE_BOOLEAN_TRUE;
             }
             return CODE_BOOLEAN_FALSE;
-        } else if (o instanceof Byte) {
-            return CODE_BYTE;
-        } else if (o instanceof Short) {
-            return CODE_SHORT;
-        } else if (o instanceof Float) {
-            // not supported by thrift
-            return CODE_FLOAT;
-        } else if (o instanceof Double) {
-            return CODE_DOUBLE;
         } else if (o instanceof byte[]) {
             return CODE_BYTEARRAY;
-        } else if (o instanceof IntStringValue) {
-            return CODE_INT_STRING;
-        } else if (o instanceof IntStringStringValue) {
-            return CODE_INT_STRING_STRING;
-        } else if (o instanceof StringStringValue) {
-            return CODE_STRING_STRING;
-        } else if (o instanceof LongIntIntByteByteStringValue) {
-            return CODE_LONG_INT_INT_BYTE_BYTE_STRING;
-        } else if (o instanceof IntBooleanIntBooleanValue) {
-            return CODE_INT_BOOLEAN_INT_BOOLEAN;
+        }
+        if (o instanceof DataType) {
+            if (o instanceof IntStringValue) {
+                return CODE_INT_STRING;
+            } else if (o instanceof IntStringStringValue) {
+                return CODE_INT_STRING_STRING;
+            } else if (o instanceof StringStringValue) {
+                return CODE_STRING_STRING;
+            } else if (o instanceof LongIntIntByteByteStringValue) {
+                return CODE_LONG_INT_INT_BYTE_BYTE_STRING;
+            } else if (o instanceof IntBooleanIntBooleanValue) {
+                return CODE_INT_BOOLEAN_INT_BOOLEAN;
+            } else if (o instanceof BytesStringStringValue) {
+                return CODE_BYTES_STRING_STRING;
+            }
         }
         return CODE_TOSTRING;
     }
@@ -194,6 +207,8 @@ public class AnnotationTranscoder {
                 return encodeLongIntIntByteByteStringValue(o);
             case CODE_INT_BOOLEAN_INT_BOOLEAN:
                 return encodeIntBooleanIntBooleanValue(o);
+            case CODE_BYTES_STRING_STRING:
+                return encodeBytesStringStringValue(o);
         }
         throw new IllegalArgumentException("unsupported DataType:" + typeCode + " data:" + o);
     }
@@ -235,6 +250,14 @@ public class AnnotationTranscoder {
         return new IntStringStringValue(intValue, stringValue1, stringValue2);
     }
 
+    private Object decodeBytesStringStringValue(byte[] data) {
+        final Buffer buffer = new FixedBuffer(data);
+        final byte[] bytesValue = buffer.readPrefixedBytes();
+        final String stringValue1 = BytesUtils.toString(buffer.readPrefixedBytes());
+        final String stringValue2 = BytesUtils.toString(buffer.readPrefixedBytes());
+        return new BytesStringStringValue(bytesValue, stringValue1, stringValue2);
+    }
+
     private byte[] encodeIntStringStringValue(Object o) {
         final IntStringStringValue tIntStringStringValue = (IntStringStringValue) o;
         final int intValue = tIntStringStringValue.getIntValue();
@@ -247,6 +270,33 @@ public class AnnotationTranscoder {
         buffer.putPrefixedBytes(stringValue1);
         buffer.putPrefixedBytes(stringValue2);
         return buffer.getBuffer();
+    }
+
+    private byte[] encodeBytesStringStringValue(Object o) {
+        final BytesStringStringValue tBytesStringStringValue = (BytesStringStringValue) o;
+        final byte[] bytesValue = tBytesStringStringValue.getBytesValue();
+        final byte[] stringValue1 = BytesUtils.toBytes(tBytesStringStringValue.getStringValue1());
+        final byte[] stringValue2 = BytesUtils.toBytes(tBytesStringStringValue.getStringValue2());
+        final int bufferSize = getBufferSize(bytesValue, stringValue1, stringValue2);
+        final Buffer buffer = new AutomaticBuffer(bufferSize);
+        buffer.putPrefixedBytes(bytesValue);
+        buffer.putPrefixedBytes(stringValue1);
+        buffer.putPrefixedBytes(stringValue2);
+        return buffer.getBuffer();
+    }
+
+    private int getBufferSize(byte[] bytesValue, byte[] stringValue1, byte[] stringValue2) {
+        int length = 0;
+        if (bytesValue != null) {
+            length += bytesValue.length;
+        }
+        if (stringValue1 != null) {
+            length += stringValue1.length;
+        }
+        if (stringValue2 != null) {
+            length += stringValue2.length;
+        }
+        return length;
     }
 
     private int getBufferSize(byte[] stringValue1, byte[] stringValue2, int reserve) {

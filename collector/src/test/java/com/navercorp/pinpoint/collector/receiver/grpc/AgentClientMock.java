@@ -16,6 +16,7 @@
 
 package com.navercorp.pinpoint.collector.receiver.grpc;
 
+import com.navercorp.pinpoint.common.trace.ServiceType;
 import com.navercorp.pinpoint.grpc.AgentHeaderFactory;
 import com.navercorp.pinpoint.grpc.client.HeaderFactory;
 import com.navercorp.pinpoint.grpc.trace.AgentGrpc;
@@ -37,15 +38,15 @@ import io.grpc.Status;
 import io.grpc.netty.NettyChannelBuilder;
 import io.grpc.stub.MetadataUtils;
 import io.grpc.stub.StreamObserver;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-import static com.google.common.base.Preconditions.checkNotNull;
 import static io.grpc.ConnectivityState.CONNECTING;
 import static io.grpc.ConnectivityState.SHUTDOWN;
 import static io.grpc.ConnectivityState.TRANSIENT_FAILURE;
@@ -54,18 +55,18 @@ import static io.grpc.ConnectivityState.TRANSIENT_FAILURE;
  * @author jaehong.kim
  */
 public class AgentClientMock {
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
 
     private final ManagedChannel channel;
     private final AgentGrpc.AgentStub agentStub;
     private final MetadataGrpc.MetadataBlockingStub metadataStub;
 
 
-    public AgentClientMock(final String host, final int port, final boolean agentHeader) throws Exception {
+    public AgentClientMock(final String host, final int port, final boolean agentHeader) {
         NettyChannelBuilder builder = NettyChannelBuilder.forAddress(host, port);
 
         if (agentHeader) {
-            HeaderFactory headerFactory = new AgentHeaderFactory("mockAgentId", "mockApplicationName", System.currentTimeMillis());
+            HeaderFactory headerFactory = new AgentHeaderFactory("mockAgentId", "mockAgentName", "mockApplicationName", ServiceType.UNDEFINED.getCode(), System.currentTimeMillis());
             final Metadata extraHeaders = headerFactory.newHeader();
             final ClientInterceptor headersInterceptor = MetadataUtils.newAttachHeadersInterceptor(extraHeaders);
             builder.intercept(headersInterceptor);
@@ -84,7 +85,7 @@ public class AgentClientMock {
         channel.shutdown().awaitTermination(await, TimeUnit.SECONDS);
     }
 
-    public void info() throws InterruptedException {
+    public void info() {
         info(1);
     }
 
@@ -102,7 +103,7 @@ public class AgentClientMock {
         apiMetaData(1);
     }
 
-    public void apiMetaData(final int count) throws InterruptedException {
+    public void apiMetaData(final int count) {
         for (int i = 0; i < count; i++) {
             PApiMetaData request = PApiMetaData.newBuilder().build();
             PResult result = metadataStub.requestApiMetaData(request);
@@ -113,7 +114,7 @@ public class AgentClientMock {
         sqlMetaData(1);
     }
 
-    public void sqlMetaData(final int count) throws InterruptedException {
+    public void sqlMetaData(final int count) {
         for (int i = 0; i < count; i++) {
             PSqlMetaData request = PSqlMetaData.newBuilder().build();
             PResult result = metadataStub.requestSqlMetaData(request);
@@ -124,7 +125,7 @@ public class AgentClientMock {
         stringMetaData(1);
     }
 
-    public void stringMetaData(final int count) throws InterruptedException {
+    public void stringMetaData(final int count) {
         for (int i = 0; i < count; i++) {
             PStringMetaData request = PStringMetaData.newBuilder().build();
             PResult result = metadataStub.requestStringMetaData(request);
@@ -156,16 +157,17 @@ public class AgentClientMock {
 
         @Override
         public void onError(Throwable throwable) {
-            logger.info("Error ", throwable);
+            Status status = Status.fromThrowable(throwable);
+            logger.info("onError:{}", status);
         }
 
         @Override
         public void onCompleted() {
             logger.info("Completed");
         }
-    };
+    }
 
-    public class CustomLoadBalancerFactory extends LoadBalancer.Factory {
+    public static class CustomLoadBalancerFactory extends LoadBalancer.Factory {
         @Override
         public LoadBalancer newLoadBalancer(LoadBalancer.Helper helper) {
             return new CustomLoadBalancer(helper);
@@ -181,16 +183,23 @@ public class AgentClientMock {
         }
 
         @Override
-        public void handleResolvedAddressGroups(List<EquivalentAddressGroup> servers, Attributes attributes) {
+        public void handleResolvedAddresses(ResolvedAddresses resolvedAddresses) {
             if (subchannel == null) {
-                subchannel = helper.createSubchannel(servers, Attributes.EMPTY);
+                CreateSubchannelArgs.Builder builder = CreateSubchannelArgs.newBuilder();
+                List<EquivalentAddressGroup> servers = resolvedAddresses.getAddresses();
+                builder.setAddresses(servers);
+                builder.setAttributes(Attributes.EMPTY);
+                CreateSubchannelArgs subchannelArgs = builder.build();
+
+                subchannel = helper.createSubchannel(subchannelArgs);
 
                 // The channel state does not get updated when doing name resolving today, so for the moment
                 // let LB report CONNECTION and call subchannel.requestConnection() immediately.
                 helper.updateBalancingState(CONNECTING, new Picker(PickResult.withSubchannel(subchannel)));
                 subchannel.requestConnection();
             } else {
-                helper.updateSubchannelAddresses(subchannel, servers);
+                List<EquivalentAddressGroup> servers = resolvedAddresses.getAddresses();
+                subchannel.updateAddresses(servers);
             }
         }
 
@@ -212,21 +221,12 @@ public class AgentClientMock {
                 return;
             }
 
-            PickResult pickResult;
-            switch (currentState) {
-                case CONNECTING:
-                    pickResult = PickResult.withNoResult();
-                    break;
-                case READY:
-                case IDLE:
-                    pickResult = PickResult.withSubchannel(subchannel);
-                    break;
-                case TRANSIENT_FAILURE:
-                    pickResult = PickResult.withError(stateInfo.getStatus());
-                    break;
-                default:
-                    throw new IllegalArgumentException("Unsupported state:" + currentState);
-            }
+            PickResult pickResult = switch (currentState) {
+                case CONNECTING -> PickResult.withNoResult();
+                case READY, IDLE -> PickResult.withSubchannel(subchannel);
+                case TRANSIENT_FAILURE -> PickResult.withError(stateInfo.getStatus());
+                default -> throw new IllegalArgumentException("Unsupported state:" + currentState);
+            };
 
             helper.updateBalancingState(currentState, new Picker(pickResult));
         }
@@ -243,7 +243,7 @@ public class AgentClientMock {
         private final LoadBalancer.PickResult result;
 
         Picker(LoadBalancer.PickResult result) {
-            this.result = checkNotNull(result, "result");
+            this.result = Objects.requireNonNull(result, "result");
         }
 
         @Override

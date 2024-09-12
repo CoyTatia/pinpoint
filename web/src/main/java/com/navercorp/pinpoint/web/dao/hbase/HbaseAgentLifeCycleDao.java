@@ -17,127 +17,154 @@
 package com.navercorp.pinpoint.web.dao.hbase;
 
 import com.navercorp.pinpoint.common.hbase.HbaseColumnFamily;
-import com.navercorp.pinpoint.common.hbase.HbaseOperations2;
-import com.navercorp.pinpoint.common.hbase.HbaseTableConstatns;
+import com.navercorp.pinpoint.common.hbase.HbaseOperations;
 import com.navercorp.pinpoint.common.hbase.ResultsExtractor;
 import com.navercorp.pinpoint.common.hbase.RowMapper;
+import com.navercorp.pinpoint.common.hbase.TableNameProvider;
 import com.navercorp.pinpoint.common.server.bo.AgentLifeCycleBo;
+import com.navercorp.pinpoint.common.server.bo.SimpleAgentKey;
+import com.navercorp.pinpoint.common.server.bo.serializer.agent.AgentIdRowKeyEncoder;
 import com.navercorp.pinpoint.common.server.util.AgentLifeCycleState;
-import com.navercorp.pinpoint.common.server.util.RowKeyUtils;
-import com.navercorp.pinpoint.common.util.TimeUtils;
 import com.navercorp.pinpoint.web.dao.AgentLifeCycleDao;
-import com.navercorp.pinpoint.web.vo.AgentInfo;
-import com.navercorp.pinpoint.web.vo.AgentStatus;
-
-import org.apache.commons.collections.CollectionUtils;
+import com.navercorp.pinpoint.web.vo.agent.AgentStatus;
+import com.navercorp.pinpoint.web.vo.agent.AgentStatusQuery;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
-import org.apache.hadoop.hbase.util.Bytes;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Repository;
 import org.springframework.util.Assert;
+import org.springframework.util.unit.DataSize;
 
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 
 /**
  * @author HyunGil Jeong
  */
 @Repository
-public class HbaseAgentLifeCycleDao extends AbstractHbaseDao implements AgentLifeCycleDao {
+public class HbaseAgentLifeCycleDao implements AgentLifeCycleDao {
 
-    private static final int SCANNER_CACHING = 20;
+    private static final int SCANNER_CACHING = 32;
+    private static final long MAX_RESULT_SIZE = DataSize.ofKilobytes(4).toBytes();
 
-    @Autowired
-    private HbaseOperations2 hbaseOperations2;
+    private static final HbaseColumnFamily.AgentLifeCycleStatus DESCRIPTOR = HbaseColumnFamily.AGENT_LIFECYCLE_STATUS;
 
-    @Autowired
-    @Qualifier("agentLifeCycleMapper")
-    private RowMapper<AgentLifeCycleBo> agentLifeCycleMapper;
+    private final HbaseOperations hbaseOperations;
+    private final TableNameProvider tableNameProvider;
+
+    private final RowMapper<AgentLifeCycleBo> agentLifeCycleMapper;
+
+    private final AgentIdRowKeyEncoder agentIdEncoder = new AgentIdRowKeyEncoder();
+
+    public HbaseAgentLifeCycleDao(HbaseOperations hbaseOperations,
+                                  TableNameProvider tableNameProvider,
+                                  @Qualifier("agentLifeCycleMapper")RowMapper<AgentLifeCycleBo> agentLifeCycleMapper) {
+        this.hbaseOperations = Objects.requireNonNull(hbaseOperations, "hbaseOperations");
+        this.tableNameProvider = Objects.requireNonNull(tableNameProvider, "tableNameProvider");
+        this.agentLifeCycleMapper = Objects.requireNonNull(agentLifeCycleMapper, "agentLifeCycleMapper");
+
+    }
 
     @Override
     public AgentStatus getAgentStatus(String agentId, long timestamp) {
-        Assert.notNull(agentId, "agentId must not be null");
+        Objects.requireNonNull(agentId, "agentId");
         Assert.isTrue(timestamp >= 0, "timestamp must not be less than 0");
 
         Scan scan = createScan(agentId, 0, timestamp);
 
-        TableName agentLifeCycleTableName = getTableName();
-        AgentLifeCycleBo agentLifeCycleBo = this.hbaseOperations2.find(agentLifeCycleTableName, scan, new MostRecentAgentLifeCycleResultsExtractor(this.agentLifeCycleMapper, timestamp));
+        TableName agentLifeCycleTableName = tableNameProvider.getTableName(DESCRIPTOR.getTable());
+        ResultsExtractor<AgentLifeCycleBo> resultsExtractor = getRecentAgentLifeCycleResultsExtractor(timestamp);
+        AgentLifeCycleBo agentLifeCycleBo = this.hbaseOperations.find(agentLifeCycleTableName, scan, resultsExtractor);
         return createAgentStatus(agentId, agentLifeCycleBo);
     }
 
     @Override
-    public void populateAgentStatus(AgentInfo agentInfo, long timestamp) {
-        if (agentInfo == null) {
-            return;
+    public Optional<AgentStatus> getAgentStatus(String agentId, long agentStartTimestamp, long timestamp) {
+        if (agentId == null) {
+            return Optional.empty();
         }
         Assert.isTrue(timestamp >= 0, "timestamp must not be less than 0");
-        final String agentId = agentInfo.getAgentId();
         // startTimestamp is stored in reverse order
-        final long toTimestamp = agentInfo.getStartTimestamp();
+        final long toTimestamp = agentStartTimestamp;
         final long fromTimestamp = toTimestamp - 1;
         Scan scan = createScan(agentId, fromTimestamp, toTimestamp);
 
-        TableName agentLifeCycleTableName = getTableName();
-        AgentLifeCycleBo agentLifeCycleBo = this.hbaseOperations2.find(agentLifeCycleTableName, scan, new MostRecentAgentLifeCycleResultsExtractor(this.agentLifeCycleMapper, timestamp));
+        TableName agentLifeCycleTableName = tableNameProvider.getTableName(DESCRIPTOR.getTable());
+        ResultsExtractor<AgentLifeCycleBo> resultsExtractor = getRecentAgentLifeCycleResultsExtractor(timestamp);
+        AgentLifeCycleBo agentLifeCycleBo = this.hbaseOperations.find(agentLifeCycleTableName, scan, resultsExtractor);
         AgentStatus agentStatus = createAgentStatus(agentId, agentLifeCycleBo);
-        agentInfo.setStatus(agentStatus);
+        return Optional.of(agentStatus);
     }
 
+    private ResultsExtractor<AgentLifeCycleBo> getRecentAgentLifeCycleResultsExtractor(long timestamp) {
+        return new MostRecentAgentLifeCycleResultsExtractor(this.agentLifeCycleMapper, timestamp);
+    }
+
+    /**
+     *
+     * @param agentStatusQuery agentId and agentStartTime
+     */
     @Override
-    public void populateAgentStatuses(Collection<AgentInfo> agentInfos, long timestamp) {
-        if (CollectionUtils.isEmpty(agentInfos)) {
-            return;
+    public List<Optional<AgentStatus>> getAgentStatus(AgentStatusQuery agentStatusQuery) {
+        Objects.requireNonNull(agentStatusQuery, "agentStatusQuery");
+        if (agentStatusQuery.getAgentKeys().isEmpty()) {
+            return Collections.emptyList();
         }
-        List<Scan> scans = new ArrayList<>(agentInfos.size());
-        for (AgentInfo agentInfo : agentInfos) {
+        List<SimpleAgentKey> agentKeyList = agentStatusQuery.getAgentKeys();
+        List<Scan> scans = new ArrayList<>(agentKeyList.size());
+        for (SimpleAgentKey agentInfo : agentKeyList) {
             if (agentInfo != null) {
-                final String agentId = agentInfo.getAgentId();
+                final String agentId = agentInfo.agentId();
                 // startTimestamp is stored in reverse order
-                final long toTimestamp = agentInfo.getStartTimestamp();
+                final long toTimestamp = agentInfo.agentStartTime();
                 final long fromTimestamp = toTimestamp - 1;
                 scans.add(createScan(agentId, fromTimestamp, toTimestamp));
             }
         }
 
-        TableName agentLifeCycleTableName = getTableName();
-        List<AgentLifeCycleBo> agentLifeCycles = this.hbaseOperations2.findParallel(agentLifeCycleTableName, scans, new MostRecentAgentLifeCycleResultsExtractor(this.agentLifeCycleMapper, timestamp));
+        TableName agentLifeCycleTableName = tableNameProvider.getTableName(DESCRIPTOR.getTable());
+        ResultsExtractor<AgentLifeCycleBo> action = getRecentAgentLifeCycleResultsExtractor(agentStatusQuery.getQueryTimestamp());
+        List<AgentLifeCycleBo> agentLifeCycles = this.hbaseOperations.findParallel(agentLifeCycleTableName, scans, action);
+
         int idx = 0;
-        for (AgentInfo agentInfo : agentInfos) {
+        List<Optional<AgentStatus>> agentStatusResult = new ArrayList<>(agentKeyList.size());
+        for (SimpleAgentKey agentInfo : agentKeyList) {
             if (agentInfo != null) {
-                AgentStatus agentStatus = createAgentStatus(agentInfo.getAgentId(), agentLifeCycles.get(idx++));
-                agentInfo.setStatus(agentStatus);
+                AgentStatus agentStatus = createAgentStatus(agentInfo.agentId(), agentLifeCycles.get(idx++));
+                agentStatusResult.add(Optional.of(agentStatus));
+            } else {
+                agentStatusResult.add(Optional.empty());
             }
         }
+        return agentStatusResult;
     }
 
     private Scan createScan(String agentId, long fromTimestamp, long toTimestamp) {
-        byte[] agentIdBytes = Bytes.toBytes(agentId);
-        long reverseFromTimestamp = TimeUtils.reverseTimeMillis(fromTimestamp);
-        long reverseToTimestamp = TimeUtils.reverseTimeMillis(toTimestamp);
-        byte[] startKeyBytes = RowKeyUtils.concatFixedByteAndLong(agentIdBytes, HbaseTableConstatns.AGENT_NAME_MAX_LEN, reverseToTimestamp);
-        byte[] endKeyBytes = RowKeyUtils.concatFixedByteAndLong(agentIdBytes, HbaseTableConstatns.AGENT_NAME_MAX_LEN, reverseFromTimestamp);
+        byte[] startKeyBytes = agentIdEncoder.encodeRowKey(agentId, toTimestamp);
+        byte[] endKeyBytes = agentIdEncoder.encodeRowKey(agentId, fromTimestamp);
 
-        Scan scan = new Scan(startKeyBytes, endKeyBytes);
-        scan.addColumn(getColumnFamilyName(), getColumnFamily().QUALIFIER_STATES);
-        scan.setMaxVersions(1);
+        Scan scan = new Scan();
+        scan.withStartRow(startKeyBytes);
+        scan.withStopRow(endKeyBytes);
+
+        scan.addColumn(DESCRIPTOR.getName(), DESCRIPTOR.QUALIFIER_STATES);
+        scan.readVersions(1);
         scan.setCaching(SCANNER_CACHING);
+        scan.setMaxResultSize(MAX_RESULT_SIZE);
 
         return scan;
     }
 
     private AgentStatus createAgentStatus(String agentId, AgentLifeCycleBo agentLifeCycle) {
         if (agentLifeCycle == null) {
-            AgentStatus agentStatus = new AgentStatus(agentId);
-            agentStatus.setState(AgentLifeCycleState.UNKNOWN);
-            return agentStatus;
+            return new AgentStatus(agentId, AgentLifeCycleState.UNKNOWN, 0);
         } else {
-            return new AgentStatus(agentLifeCycle);
+            return new AgentStatus(agentLifeCycle.getAgentId(), agentLifeCycle.getAgentLifeCycleState(), agentLifeCycle.getEventTimestamp());
         }
     }
 
@@ -147,7 +174,7 @@ public class HbaseAgentLifeCycleDao extends AbstractHbaseDao implements AgentLif
         private final long queryTimestamp;
 
         private MostRecentAgentLifeCycleResultsExtractor(RowMapper<AgentLifeCycleBo> agentLifeCycleMapper, long queryTimestamp) {
-            this.agentLifeCycleMapper = agentLifeCycleMapper;
+            this.agentLifeCycleMapper = Objects.requireNonNull(agentLifeCycleMapper, "agentLifeCycleMapper");
             this.queryTimestamp = queryTimestamp;
         }
 
@@ -164,9 +191,5 @@ public class HbaseAgentLifeCycleDao extends AbstractHbaseDao implements AgentLif
         }
     }
 
-    @Override
-    public HbaseColumnFamily.AgentLifeCycleStatus getColumnFamily() {
-        return HbaseColumnFamily.AGENT_LIFECYCLE_STATUS;
-    }
 
 }

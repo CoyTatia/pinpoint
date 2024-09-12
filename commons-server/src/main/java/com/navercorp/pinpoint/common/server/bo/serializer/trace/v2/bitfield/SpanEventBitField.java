@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 NAVER Corp.
+ * Copyright 2019 NAVER Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,12 +16,13 @@
 
 package com.navercorp.pinpoint.common.server.bo.serializer.trace.v2.bitfield;
 
+import com.navercorp.pinpoint.common.profiler.encoding.BitFieldUtils;
 import com.navercorp.pinpoint.common.server.bo.AnnotationBo;
 import com.navercorp.pinpoint.common.server.bo.SpanEventBo;
-import com.navercorp.pinpoint.common.util.BitFieldUtils;
-import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.collections4.CollectionUtils;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author Woonduk Kang(emeroad)
@@ -32,6 +33,7 @@ public class SpanEventBitField {
     public static final int SET_ANNOTATION = 0;
     public static final int SET_HAS_EXCEPTION = 1;
     public static final int SET_NEXT_ASYNCID = 2;
+    @Deprecated
     public static final int SET_ASYNCID = 3;
     public static final int SET_NEXT_SPANID = 4;
     public static final int SET_ENDPOINT = 5;
@@ -51,87 +53,73 @@ public class SpanEventBitField {
 
 
     public static SpanEventBitField buildFirst(SpanEventBo spanEventBo) {
-        if (spanEventBo == null) {
-            throw new NullPointerException("spanEventBo must not be null");
-        }
-        final SpanEventBitField bitFiled = new SpanEventBitField();
+        Objects.requireNonNull(spanEventBo, "spanEventBo");
 
-        if (spanEventBo.getRpc() != null) {
-            bitFiled.setRpc(true);
-        }
+        final SpanEventBitField bitField = new SpanEventBitField();
+
         if (spanEventBo.getEndPoint() != null) {
-            bitFiled.setEndPoint(true);
+            bitField.setEndPoint(true);
         }
 
         if (spanEventBo.getDestinationId() != null) {
-            bitFiled.setDestinationId(true);
+            bitField.setDestinationId(true);
         }
 
         if (spanEventBo.getNextSpanId() != -1) {
-            bitFiled.setNextSpanId(true);
+            bitField.setNextSpanId(true);
         }
 
         if (spanEventBo.hasException()) {
-            bitFiled.setHasException(true);
+            bitField.setHasException(true);
         }
 
         final List<AnnotationBo> annotationBoList = spanEventBo.getAnnotationBoList();
         if (CollectionUtils.isNotEmpty(annotationBoList)) {
-            bitFiled.setAnnotation(true);
+            bitField.setAnnotation(true);
         }
 
         if (spanEventBo.getNextAsyncId() != -1)  {
-            bitFiled.setNextAsyncId(true);
+            bitField.setNextAsyncId(true);
         }
 
-
-        if (spanEventBo.getAsyncId() == -1 && spanEventBo.getAsyncSequence() == -1) {
-            bitFiled.setAsyncId(false);
-        } else {
-            bitFiled.setAsyncId(true);
-        }
-        return bitFiled;
+        return bitField;
     }
 
     public static SpanEventBitField build(SpanEventBo spanEventBo, SpanEventBo prevSpanEventBo) {
-        if (spanEventBo == null) {
-            throw new NullPointerException("spanEventBo must not be null");
-        }
-        if (prevSpanEventBo == null) {
-            throw new NullPointerException("prevSpanEventBo must not be null");
-        }
+        Objects.requireNonNull(spanEventBo, "spanEventBo");
+        Objects.requireNonNull(prevSpanEventBo, "prevSpanEventBo");
 
-        final SpanEventBitField bitFiled = buildFirst(spanEventBo);
+        final SpanEventBitField bitField = buildFirst(spanEventBo);
 
         if (spanEventBo.getStartElapsed() == prevSpanEventBo.getStartElapsed()) {
-            bitFiled.setStartElapsedEncodingStrategy(StartElapsedTimeEncodingStrategy.PREV_EQUALS);
+            bitField.setStartElapsedEncodingStrategy(StartElapsedTimeEncodingStrategy.PREV_EQUALS);
         } else {
-            bitFiled.setStartElapsedEncodingStrategy(StartElapsedTimeEncodingStrategy.PREV_DELTA);
+            bitField.setStartElapsedEncodingStrategy(StartElapsedTimeEncodingStrategy.PREV_DELTA);
         }
 
         // sequence prev: 5 current: 6 = 6 - 5= delta 1
         final short sequenceDelta = (short) (spanEventBo.getSequence() - prevSpanEventBo.getSequence());
         if (sequenceDelta == 1) {
-            bitFiled.setSequenceEncodingStrategy(SequenceEncodingStrategy.PREV_ADD1);
+            bitField.setSequenceEncodingStrategy(SequenceEncodingStrategy.PREV_ADD1);
         } else {
-            bitFiled.setSequenceEncodingStrategy(SequenceEncodingStrategy.PREV_DELTA);
+            bitField.setSequenceEncodingStrategy(SequenceEncodingStrategy.PREV_DELTA);
         }
 
         if (spanEventBo.getDepth() == prevSpanEventBo.getDepth()) {
-            bitFiled.setDepthEncodingStrategy(DepthEncodingStrategy.PREV_EQUALS);
+            bitField.setDepthEncodingStrategy(DepthEncodingStrategy.PREV_EQUALS);
         } else {
-            bitFiled.setDepthEncodingStrategy(DepthEncodingStrategy.RAW);
+            bitField.setDepthEncodingStrategy(DepthEncodingStrategy.RAW);
         }
 
 
         if (prevSpanEventBo.getServiceType() == spanEventBo.getServiceType()) {
-            bitFiled.setServiceTypeEncodingStrategy(ServiceTypeEncodingStrategy.PREV_EQUALS);
+            bitField.setServiceTypeEncodingStrategy(ServiceTypeEncodingStrategy.PREV_EQUALS);
         } else {
-            bitFiled.setServiceTypeEncodingStrategy(ServiceTypeEncodingStrategy.RAW);
+            bitField.setServiceTypeEncodingStrategy(ServiceTypeEncodingStrategy.RAW);
         }
 
 
-        return bitFiled;
+        return bitField;
     }
 
     public SpanEventBitField() {
@@ -213,25 +201,6 @@ public class SpanEventBitField {
     void setDestinationId(boolean destinationId) {
         setBit(SET_DESTINATIONID, destinationId);
     }
-
-    @Deprecated
-    public boolean isSetRpc() {
-        return testBit(SET_RPC);
-    }
-
-    @Deprecated
-    void setRpc(boolean rpc) {
-        setBit(SET_RPC, rpc);
-    }
-
-    public boolean isSetAsyncId() {
-        return testBit(SET_ASYNCID);
-    }
-
-    void setAsyncId(boolean asyncId) {
-        setBit(SET_ASYNCID, asyncId);
-    }
-
 
 
     public StartElapsedTimeEncodingStrategy getStartElapsedEncodingStrategy() {

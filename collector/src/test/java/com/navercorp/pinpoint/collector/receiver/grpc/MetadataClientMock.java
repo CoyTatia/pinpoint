@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,11 +18,14 @@ package com.navercorp.pinpoint.collector.receiver.grpc;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 import com.google.protobuf.GeneratedMessageV3;
-import com.navercorp.pinpoint.common.util.PinpointThreadFactory;
+import com.navercorp.pinpoint.common.profiler.concurrent.PinpointThreadFactory;
+import com.navercorp.pinpoint.common.trace.ServiceType;
 import com.navercorp.pinpoint.grpc.AgentHeaderFactory;
 import com.navercorp.pinpoint.grpc.client.ChannelFactory;
-import com.navercorp.pinpoint.grpc.client.ChannelFactoryOption;
+import com.navercorp.pinpoint.grpc.client.ChannelFactoryBuilder;
+import com.navercorp.pinpoint.grpc.client.DefaultChannelFactoryBuilder;
 import com.navercorp.pinpoint.grpc.client.HeaderFactory;
+import com.navercorp.pinpoint.grpc.client.config.ClientOption;
 import com.navercorp.pinpoint.grpc.trace.MetadataGrpc;
 import com.navercorp.pinpoint.grpc.trace.PApiMetaData;
 import com.navercorp.pinpoint.grpc.trace.PResult;
@@ -36,8 +39,8 @@ import io.netty.util.HashedWheelTimer;
 import io.netty.util.Timeout;
 import io.netty.util.Timer;
 import io.netty.util.TimerTask;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -55,39 +58,45 @@ public class MetadataClientMock {
     private static final ScheduledExecutorService RECONNECT_SCHEDULER
             = Executors.newScheduledThreadPool(1, new PinpointThreadFactory("Pinpoint-reconnect-thread"));
 
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private final Logger logger = LogManager.getLogger(this.getClass());
 
     private final ChannelFactory channelFactory;
     private final ManagedChannel channel;
     private final Timer retryTimer;
     private final RetryScheduler<GeneratedMessageV3, PResult> retryScheduler;
 
-    private volatile MetadataGrpc.MetadataStub metadataStub;
+    private final MetadataGrpc.MetadataStub metadataStub;
     private final AtomicInteger requestCounter = new AtomicInteger(0);
     private final AtomicInteger responseCounter = new AtomicInteger(0);
     private final List<String> responseList = new ArrayList<>();
 
     public MetadataClientMock(final String host, final int port, final boolean agentHeader) {
-        HeaderFactory headerFactory = new AgentHeaderFactory("mockAgentId", "mockApplicationName", System.currentTimeMillis());
-        ChannelFactoryOption.Builder builder = ChannelFactoryOption.newBuilder();
-        builder.setHeaderFactory(headerFactory);
+
 
         this.retryTimer = newTimer(this.getClass().getName());
-        this.channelFactory = new ChannelFactory(builder.build());
-        this.channel = channelFactory.build("MetadataClientMock", host, port);
+        this.channelFactory = newChannelFactory();
+        this.channel = channelFactory.build(host, port);
 
         this.metadataStub = MetadataGrpc.newStub(channel);
-        this.retryScheduler = new RetryScheduler<GeneratedMessageV3, PResult>() {
+        this.retryScheduler = new RetryScheduler<>() {
             @Override
             public boolean isSuccess(PResult response) {
                 return response.getSuccess();
             }
 
             @Override
-            public void scheduleNextRetry(GeneratedMessageV3 request, int remainingRetryCount) {
-                MetadataClientMock.this.scheduleNextRetry(request, remainingRetryCount);
+            public void scheduleNextRetry(GeneratedMessageV3 request, int retryCount) {
+                MetadataClientMock.this.scheduleNextRetry(request, retryCount);
             }
         };
+    }
+
+    private ChannelFactory newChannelFactory() {
+        HeaderFactory headerFactory = new AgentHeaderFactory("mockAgentId", "mockAgentName", "mockApplicationName", ServiceType.UNDEFINED.getCode(), System.currentTimeMillis());
+        ChannelFactoryBuilder channelFactoryBuilder = new DefaultChannelFactoryBuilder("MetadataClientMock");
+        channelFactoryBuilder.setHeaderFactory(headerFactory);
+        channelFactoryBuilder.setClientOption(new ClientOption());
+        return channelFactoryBuilder.build();
     }
 
     public void stop() throws InterruptedException {
@@ -148,16 +157,13 @@ public class MetadataClientMock {
             return;
         }
 
-        if (message instanceof PSqlMetaData) {
-            PSqlMetaData sqlMetaData = (PSqlMetaData) message;
+        if (message instanceof PSqlMetaData sqlMetaData) {
             StreamObserver<PResult> responseObserver = newResponseObserver(message, retryCount);
             this.metadataStub.requestSqlMetaData(sqlMetaData, responseObserver);
-        } else if (message instanceof PApiMetaData) {
-            final PApiMetaData apiMetaData = (PApiMetaData) message;
+        } else if (message instanceof PApiMetaData apiMetaData) {
             StreamObserver<PResult> responseObserver = newResponseObserver(message, retryCount);
             this.metadataStub.requestApiMetaData(apiMetaData, responseObserver);
-        } else if (message instanceof PStringMetaData) {
-            final PStringMetaData stringMetaData = (PStringMetaData) message;
+        } else if (message instanceof PStringMetaData stringMetaData) {
             StreamObserver<PResult> responseObserver = newResponseObserver(message, retryCount);
             this.metadataStub.requestStringMetaData(stringMetaData, responseObserver);
         } else {
@@ -171,10 +177,7 @@ public class MetadataClientMock {
     private void scheduleNextRetry(GeneratedMessageV3 request, int remainingRetryCount) {
         final TimerTask timerTask = new TimerTask() {
             @Override
-            public void run(Timeout timeout) throws Exception {
-                if (timeout.isExpired()) {
-                    return;
-                }
+            public void run(Timeout timeout) {
                 if (timeout.cancel()) {
                     return;
                 }

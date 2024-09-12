@@ -21,32 +21,31 @@ import com.navercorp.pinpoint.collector.receiver.DispatchHandler;
 import com.navercorp.pinpoint.common.server.util.AcceptedTimeService;
 import com.navercorp.pinpoint.io.request.ServerRequest;
 import com.navercorp.pinpoint.io.request.ServerResponse;
-import com.navercorp.pinpoint.thrift.dto.TResult;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.Objects;
 
 /**
  * @author Woonduk Kang(emeroad)
  */
-public class DelegateDispatchHandler implements DispatchHandler {
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+public class DelegateDispatchHandler<REQ, RES> implements DispatchHandler<REQ, RES> {
+    private final Logger logger = LogManager.getLogger(this.getClass());
 
-    private AcceptedTimeService acceptedTimeService;
-    private final DispatchHandler delegate;
+    private final AcceptedTimeService acceptedTimeService;
+    private final DispatchHandler<REQ, RES> delegate;
 
     private final HandlerManager handlerManager;
 
-    public DelegateDispatchHandler(AcceptedTimeService acceptedTimeService, DispatchHandler delegate, HandlerManager handlerManager) {
-        this.acceptedTimeService = Objects.requireNonNull(acceptedTimeService, "acceptedTimeService must not be null");
-        this.delegate = Objects.requireNonNull(delegate, "delegate must not be null");
-        this.handlerManager = Objects.requireNonNull(handlerManager, "handlerManager must not be null");
+    public DelegateDispatchHandler(AcceptedTimeService acceptedTimeService, DispatchHandler<REQ, RES> delegate, HandlerManager handlerManager) {
+        this.acceptedTimeService = Objects.requireNonNull(acceptedTimeService, "acceptedTimeService");
+        this.delegate = Objects.requireNonNull(delegate, "delegate");
+        this.handlerManager = Objects.requireNonNull(handlerManager, "handlerManager");
     }
 
 
     @Override
-    public void dispatchSendMessage(ServerRequest serverRequest) {
+    public void dispatchSendMessage(ServerRequest<REQ> serverRequest) {
         acceptedTimeService.accept();
 
         if (!checkAvailable()) {
@@ -59,14 +58,12 @@ public class DelegateDispatchHandler implements DispatchHandler {
 
 
     @Override
-    public void dispatchRequestMessage(ServerRequest serverRequest, ServerResponse serverResponse) {
+    public void dispatchRequestMessage(ServerRequest<REQ> serverRequest, ServerResponse<RES> serverResponse) {
         acceptedTimeService.accept();
 
         if (!checkAvailable()) {
             logger.debug("Handler is disabled. Skipping request message {}.", serverRequest);
-            TResult result = new TResult(false);
-            result.setMessage("Handler is disabled. Skipping request message.");
-            serverResponse.write(result);
+            serverResponse.finish();
             return;
         }
 

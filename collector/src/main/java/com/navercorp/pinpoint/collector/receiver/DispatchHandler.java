@@ -18,17 +18,16 @@ package com.navercorp.pinpoint.collector.receiver;
 
 import com.navercorp.pinpoint.io.request.ServerRequest;
 import com.navercorp.pinpoint.io.request.ServerResponse;
-import org.apache.thrift.TBase;
 
 /**
  * @author emeroad
  * @author koo.taejin
  */
-public interface DispatchHandler {
+public interface DispatchHandler<REQ, RES> {
 
     // Separating Send and Request. That dose not be satisfied but try to change that later.
-    void dispatchSendMessage(ServerRequest serverRequest);
+    void dispatchSendMessage(ServerRequest<REQ> serverRequest);
 
-    void dispatchRequestMessage(ServerRequest serverRequest, ServerResponse serverResponse);
+    void dispatchRequestMessage(ServerRequest<REQ> serverRequest, ServerResponse<RES> serverResponse);
 
 }

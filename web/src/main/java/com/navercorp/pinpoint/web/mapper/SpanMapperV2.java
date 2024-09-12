@@ -1,11 +1,11 @@
 /*
- * Copyright 2014 NAVER Corp.
+ * Copyright 2019 NAVER Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,10 +16,16 @@
 
 package com.navercorp.pinpoint.web.mapper;
 
+import com.google.common.collect.LinkedListMultimap;
+import com.google.common.collect.ListMultimap;
 import com.navercorp.pinpoint.common.buffer.Buffer;
+import com.navercorp.pinpoint.common.buffer.CachedStringAllocator;
 import com.navercorp.pinpoint.common.buffer.FixedBuffer;
+import com.navercorp.pinpoint.common.buffer.StringAllocator;
+import com.navercorp.pinpoint.common.buffer.StringCacheableBuffer;
 import com.navercorp.pinpoint.common.hbase.HbaseColumnFamily;
 import com.navercorp.pinpoint.common.hbase.RowMapper;
+import com.navercorp.pinpoint.common.profiler.util.TransactionId;
 import com.navercorp.pinpoint.common.server.bo.BasicSpan;
 import com.navercorp.pinpoint.common.server.bo.SpanBo;
 import com.navercorp.pinpoint.common.server.bo.SpanChunkBo;
@@ -29,43 +35,57 @@ import com.navercorp.pinpoint.common.server.bo.serializer.RowKeyDecoder;
 import com.navercorp.pinpoint.common.server.bo.serializer.trace.v2.SpanDecoder;
 import com.navercorp.pinpoint.common.server.bo.serializer.trace.v2.SpanDecoderV0;
 import com.navercorp.pinpoint.common.server.bo.serializer.trace.v2.SpanDecodingContext;
-import com.navercorp.pinpoint.common.util.Assert;
-import com.navercorp.pinpoint.common.util.TransactionId;
+import com.navercorp.pinpoint.common.trace.ServiceTypeCategory;
+import com.navercorp.pinpoint.common.util.CollectionUtils;
+import com.navercorp.pinpoint.common.util.LRUCache;
 import com.navercorp.pinpoint.io.SpanVersion;
-
-import com.google.common.collect.LinkedListMultimap;
-import com.google.common.collect.ListMultimap;
-import com.google.common.collect.Lists;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.util.Bytes;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * @author emeroad
+ * @author Taejin Koo
  */
 public class SpanMapperV2 implements RowMapper<List<SpanBo>> {
 
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
+    private static final int DISABLED_CACHE = -1;
+
+    private final Logger logger = LogManager.getLogger(this.getClass());
 
     private final SpanDecoder spanDecoder;
 
     private final RowKeyDecoder<TransactionId> rowKeyDecoder;
 
+    private final int cacheSize;
+
     public SpanMapperV2(RowKeyDecoder<TransactionId> rowKeyDecoder) {
-        this(rowKeyDecoder, new SpanDecoderV0());
+        this(rowKeyDecoder, new SpanDecoderV0(), DISABLED_CACHE);
+    }
+
+    public SpanMapperV2(RowKeyDecoder<TransactionId> rowKeyDecoder, int cacheSize) {
+        this(rowKeyDecoder, new SpanDecoderV0(), cacheSize);
     }
 
     public SpanMapperV2(RowKeyDecoder<TransactionId> rowKeyDecoder, SpanDecoder spanDecoder) {
-        this.rowKeyDecoder = Assert.requireNonNull(rowKeyDecoder, "rowKeyDecoder must not be null");
-        this.spanDecoder = Assert.requireNonNull(spanDecoder, "spanDecoder must not be null");
+        this(rowKeyDecoder, spanDecoder, DISABLED_CACHE);
+    }
+
+    public SpanMapperV2(RowKeyDecoder<TransactionId> rowKeyDecoder, SpanDecoder spanDecoder, int cacheSize) {
+        this.rowKeyDecoder = Objects.requireNonNull(rowKeyDecoder, "rowKeyDecoder");
+        this.spanDecoder = Objects.requireNonNull(spanDecoder, "spanDecoder");
+        this.cacheSize = cacheSize;
     }
 
     @Override
@@ -86,6 +106,8 @@ public class SpanMapperV2 implements RowMapper<List<SpanBo>> {
         final SpanDecodingContext decodingContext = new SpanDecodingContext();
         decodingContext.setTransactionId(transactionId);
 
+        final BufferFactory bufferFactory = new BufferFactory(cacheSize);
+
         for (Cell cell : rawCells) {
             SpanDecoder spanDecoder = null;
             // only if family name is "span"
@@ -93,28 +115,29 @@ public class SpanMapperV2 implements RowMapper<List<SpanBo>> {
 
                 decodingContext.setCollectorAcceptedTime(cell.getTimestamp());
 
-                final Buffer qualifier = new FixedBuffer(CellUtil.cloneQualifier(cell));
-                final Buffer columnValue = new FixedBuffer(CellUtil.cloneValue(cell));
+                final Buffer qualifier = bufferFactory.createBuffer(CellUtil.cloneQualifier(cell));
+                final Buffer columnValue = bufferFactory.createBuffer(CellUtil.cloneValue(cell));
 
                 spanDecoder = resolveDecoder(columnValue);
                 final Object decodeObject = spanDecoder.decode(qualifier, columnValue, decodingContext);
-                if (decodeObject instanceof SpanBo) {
-                    SpanBo spanBo = (SpanBo) decodeObject;
-                    if (logger.isDebugEnabled()) {
-                        logger.debug("spanBo:{}", spanBo);
+                if (decodeObject instanceof SpanBo spanBo) {
+                    if (logger.isTraceEnabled()) {
+                        logger.trace("spanBo:{}", spanBo);
                     }
                     AgentKey agentKey = newAgentKey(spanBo);
                     spanMap.put(agentKey, spanBo);
-                } else if (decodeObject instanceof SpanChunkBo) {
-                    SpanChunkBo spanChunkBo = (SpanChunkBo) decodeObject;
-                    if (logger.isDebugEnabled()) {
-                        logger.debug("spanChunkBo:{}", spanChunkBo);
+                } else if (decodeObject instanceof SpanChunkBo spanChunkBo) {
+                    if (logger.isTraceEnabled()) {
+                        logger.trace("spanChunkBo:{}", spanChunkBo);
                     }
                     spanChunkList.add(spanChunkBo);
                 }
 
             } else {
-                logger.warn("Unknown ColumnFamily :{}", Bytes.toStringBinary(CellUtil.cloneFamily(cell)));
+                if (logger.isWarnEnabled()) {
+                    String columnFamily = Bytes.toStringBinary(cell.getFamilyArray(), cell.getFamilyOffset(), cell.getFamilyLength());
+                    logger.warn("Unknown ColumnFamily :{}", columnFamily);
+                }
             }
             nextCell(spanDecoder, decodingContext);
         }
@@ -123,6 +146,28 @@ public class SpanMapperV2 implements RowMapper<List<SpanBo>> {
 
         return buildSpanBoList(spanMap, spanChunkList);
 
+    }
+
+    public static class BufferFactory {
+
+        private final StringAllocator stringAllocator;
+
+        public BufferFactory(int cacheSize) {
+            if (cacheSize > 0) {
+                Map<ByteBuffer, String> lruCache = new LRUCache<>(cacheSize);
+                this.stringAllocator = new CachedStringAllocator(lruCache);
+            } else {
+                this.stringAllocator = null;
+            }
+        }
+
+        public Buffer createBuffer(byte[] buffer) {
+            if (stringAllocator != null) {
+                return new StringCacheableBuffer(buffer, stringAllocator);
+            } else {
+                return new FixedBuffer(buffer);
+            }
+        }
     }
 
     private void nextCell(SpanDecoder spanDecoder, SpanDecodingContext decodingContext) {
@@ -161,23 +206,25 @@ public class SpanMapperV2 implements RowMapper<List<SpanBo>> {
         for (SpanChunkBo spanChunkBo : spanChunkList) {
             AgentKey agentKey = newAgentKey(spanChunkBo);
             List<SpanBo> matchedSpanBoList = spanMap.get(agentKey);
-            if (matchedSpanBoList != null) {
-                final int spanIdCollisionSize = matchedSpanBoList.size();
-                if (spanIdCollisionSize > 1) {
-                    // exceptional case dump
-                    logger.warn("spanIdCollision {}", matchedSpanBoList);
-                }
-
+            if (CollectionUtils.hasLength(matchedSpanBoList)) {
                 int agentLevelCollisionCount = 0;
+                final int spanIdCollisionSize = matchedSpanBoList.size();
+                boolean ignoreCollision = false;
                 for (SpanBo spanBo : matchedSpanBoList) {
+                    if (ServiceTypeCategory.MESSAGE_BROKER.contains(spanBo.getServiceType())) {
+                        ignoreCollision = true;
+                    }
                     if (isChildSpanChunk(spanBo, spanChunkBo)) {
                         spanBo.addSpanChunkBo(spanChunkBo);
                         agentLevelCollisionCount++;
                     }
                 }
-                if (agentLevelCollisionCount > 1) {
-                    // exceptional case dump
-                    logger.warn("agentLevelCollision {}", matchedSpanBoList);
+
+                if (Boolean.FALSE == ignoreCollision) {
+                    if (agentLevelCollisionCount > 1 || spanIdCollisionSize > 1) {
+                        // exceptional case dump
+                        logger.warn("Collision agentLevel={}, spanId={}, matchedSpanBoList={}", agentLevelCollisionCount, spanIdCollisionSize, matchedSpanBoList);
+                    }
                 }
             } else {
                 if (logger.isInfoEnabled()) {
@@ -185,7 +232,7 @@ public class SpanMapperV2 implements RowMapper<List<SpanBo>> {
                 }
             }
         }
-        return Lists.newArrayList(spanMap.values());
+        return new ArrayList<>(spanMap.values());
     }
 
     private boolean isChildSpanChunk(SpanBo spanBo, SpanChunkBo spanChunkBo) {
@@ -208,57 +255,6 @@ public class SpanMapperV2 implements RowMapper<List<SpanBo>> {
         return new AgentKey(basicSpan.getApplicationId(), basicSpan.getAgentId(), basicSpan.getAgentStartTime(), basicSpan.getSpanId());
     }
 
-    public static class AgentKey {
-        private final long spanId;
-        private final String applicationId;
-        private final String agentId;
-        private final long agentStartTime;
-
-
-        public AgentKey(String applicationId, String agentId, long agentStartTime, long spanId) {
-            if (applicationId == null) {
-                throw new NullPointerException("applicationId must not be null");
-            }
-            if (agentId == null) {
-                throw new NullPointerException("agentId must not be null");
-            }
-            this.applicationId = applicationId;
-            this.agentId = agentId;
-            this.agentStartTime = agentStartTime;
-            this.spanId = spanId;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-
-            AgentKey agentKey = (AgentKey) o;
-
-            if (spanId != agentKey.spanId) return false;
-            if (agentStartTime != agentKey.agentStartTime) return false;
-            if (!applicationId.equals(agentKey.applicationId)) return false;
-            return agentId.equals(agentKey.agentId);
-
-        }
-
-        @Override
-        public int hashCode() {
-            int result = (int) (spanId ^ (spanId >>> 32));
-            result = 31 * result + applicationId.hashCode();
-            result = 31 * result + agentId.hashCode();
-            result = 31 * result + (int) (agentStartTime ^ (agentStartTime >>> 32));
-            return result;
-        }
-
-        @Override
-        public String toString() {
-            return "AgentKey{" +
-                    "spanId=" + spanId +
-                    ", applicationId='" + applicationId + '\'' +
-                    ", agentId='" + agentId + '\'' +
-                    ", agentStartTime=" + agentStartTime +
-                    '}';
-        }
+    private record AgentKey(String applicationId, String agentId, long agentStartTime, long spanId) {
     }
 }

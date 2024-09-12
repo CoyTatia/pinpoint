@@ -1,11 +1,11 @@
 /*
- * Copyright 2015 NAVER Corp.
+ * Copyright 2019 NAVER Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,25 +15,27 @@
  */
 package com.navercorp.pinpoint.web.view;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import com.navercorp.pinpoint.common.util.TransactionId;
-import com.navercorp.pinpoint.common.util.TransactionIdUtils;
-
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-import com.navercorp.pinpoint.common.util.DateUtils;
+import com.navercorp.pinpoint.common.profiler.util.TransactionId;
+import com.navercorp.pinpoint.common.server.util.DateTimeFormatUtils;
+import com.navercorp.pinpoint.web.applicationmap.ApplicationMap;
+import com.navercorp.pinpoint.web.applicationmap.SimpleApplicationMap;
+import com.navercorp.pinpoint.web.applicationmap.histogram.TimeHistogramFormat;
 import com.navercorp.pinpoint.web.applicationmap.link.Link;
 import com.navercorp.pinpoint.web.applicationmap.nodes.Node;
 import com.navercorp.pinpoint.web.calltree.span.TraceState;
 import com.navercorp.pinpoint.web.vo.callstacks.Record;
 import com.navercorp.pinpoint.web.vo.callstacks.RecordSet;
-import org.apache.commons.lang3.StringEscapeUtils;
-import org.apache.commons.lang3.StringUtils;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 /**
  * @author jaehong.kim
@@ -41,26 +43,32 @@ import org.apache.commons.lang3.StringUtils;
  */
 public class TransactionInfoViewModel {
 
-    private TransactionId transactionId;
-    private Collection<Node> nodes;
-    private Collection<Link> links;
-    private RecordSet recordSet;
-    private TraceState.State completeState;
-    private boolean logLinkEnable;
-    private String logButtonName;
-    private String logPageUrl;
-    private String disableButtonMessage;
+    private final TransactionId transactionId;
+    private final long spanId;
+    private final Collection<Node> nodes;
+    private final Collection<Link> links;
+    private final RecordSet recordSet;
+    private final TraceState.State completeState;
 
-    public TransactionInfoViewModel(TransactionId transactionId, Collection<Node> nodes, Collection<Link> links, RecordSet recordSet, TraceState.State state, boolean logLinkEnable, String logButtonName, String logPageUrl, String disableButtonMessage) {
+    private final LogLinkView logLinkView;
+    private TimeHistogramFormat timeHistogramFormat = TimeHistogramFormat.V1;
+
+    public TransactionInfoViewModel(TransactionId transactionId, long spanId,
+                                    Collection<Node> nodes, Collection<Link> links,
+                                    RecordSet recordSet, TraceState.State state,
+                                    LogLinkView logLinkView) {
         this.transactionId = transactionId;
-        this.nodes = nodes;
-        this.links = links;
+        this.spanId = spanId;
+        this.nodes = Objects.requireNonNullElseGet(nodes, Collections::emptyList);
+        this.links = Objects.requireNonNullElseGet(links, Collections::emptyList);
+
         this.recordSet = recordSet;
         this.completeState = state;
-        this.logLinkEnable = logLinkEnable;
-        this.logButtonName = logButtonName;
-        this.logPageUrl = logPageUrl;
-        this.disableButtonMessage = disableButtonMessage;
+        this.logLinkView = Objects.requireNonNull(logLinkView, "logLinkView");
+    }
+
+    public void setTimeHistogramFormat(TimeHistogramFormat timeHistogramFormat) {
+        this.timeHistogramFormat = timeHistogramFormat;
     }
 
     @JsonProperty("applicationName")
@@ -70,12 +78,22 @@ public class TransactionInfoViewModel {
 
     @JsonProperty("transactionId")
     public String getTransactionId() {
-        return TransactionIdUtils.formatString(transactionId);
+        return transactionId.toString();
+    }
+
+    @JsonProperty("spanId")
+    public long getSpanId() {
+        return spanId;
     }
 
     @JsonProperty("agentId")
     public String getAgentId() {
         return recordSet.getAgentId();
+    }
+
+    @JsonProperty("agentName")
+    public String getAgentName() {
+        return recordSet.getAgentName();
     }
 
     @JsonProperty("applicationId")
@@ -98,65 +116,39 @@ public class TransactionInfoViewModel {
         return completeState.toString();
     }
 
-    @JsonProperty("logLinkEnable")
-    public boolean isLogLinkEnable() {
-        return logLinkEnable;
-    }
-
     @JsonProperty("loggingTransactionInfo")
     public boolean isLoggingTransactionInfo() {
         return recordSet.isLoggingTransactionInfo();
     }
 
-    @JsonProperty("logButtonName")
-    public String getLogButtonName() {
-        return logButtonName;
-    }
-
-    @JsonProperty("logPageUrl")
-    public String getLogPageUrl() {
-        if (StringUtils.isNotEmpty(logPageUrl)) {
-            StringBuilder sb = new StringBuilder();
-            sb.append("transactionId=").append(getTransactionId());
-            sb.append("&time=").append(recordSet.getStartTime());
-            return logPageUrl + "?" + sb.toString();
-        }
-
-        return "";
-    }
-
-    @JsonProperty("disableButtonMessage")
-    public String getDisableButtonMessage() {
-        return disableButtonMessage;
+    @JsonUnwrapped
+    public LogLinkView getLogLink() {
+        return logLinkView;
     }
 
     @JsonProperty("callStackIndex")
     public Map<String, Integer> getCallStackIndex() {
-        final Map<String, Integer> index = new HashMap<String, Integer>();
-        for (int i = 0; i < CallStack.INDEX.length; i++) {
-            index.put(CallStack.INDEX[i], i);
-        }
-
-        return index;
+        return Field.getFieldMap();
     }
 
     @JsonProperty("callStack")
     public List<CallStack> getCallStack() {
 
-        List<CallStack> list = new ArrayList<CallStack>();
+        List<CallStack> list = new ArrayList<>();
         boolean first = true;
         long barRatio = 0;
-        for(Record record : recordSet.getRecordList()) {
-            if(first) {
-                if(record.isMethod()) {
+        for (Record record : recordSet.getRecordList()) {
+            if (first) {
+                if (record.isMethod()) {
                     long begin = record.getBegin();
                     long end = record.getBegin() + record.getElapsed();
-                    if(end  - begin > 0) {
+                    if (end - begin > 0) {
                         barRatio = 100 / (end - begin);
                     }
                 }
                 first = false;
             }
+
             list.add(new CallStack(record, barRatio));
         }
 
@@ -164,55 +156,75 @@ public class TransactionInfoViewModel {
     }
 
     @JsonProperty("applicationMapData")
-    public Map<String, List<Object>> getApplicationMapData() {
-        Map<String, List<Object>> result = new HashMap<String, List<Object>>();
-        List<Object> nodeDataArray = new ArrayList<Object>();
-        for(Node node : nodes) {
-            nodeDataArray.add(node);
-        }
-        result.put("nodeDataArray", nodeDataArray);
-        List<Object> linkDataArray = new ArrayList<Object>();
-        for(Link link : links) {
-            linkDataArray.add(link);
-        }
-        result.put("linkDataArray", linkDataArray);
+    public ApplicationMap getApplicationMapData() {
 
-        return result;
+        if (timeHistogramFormat == TimeHistogramFormat.V2) {
+            for (Node node : nodes) {
+                node.setTimeHistogramFormat(timeHistogramFormat);
+            }
+            for (Link link : links) {
+                link.setTimeHistogramFormat(timeHistogramFormat);
+            }
+        }
+
+        return new SimpleApplicationMap(nodes, links);
     }
 
-    @JsonSerialize(using=TransactionInfoCallStackSerializer.class)
-    public static class CallStack {
-        static final String[] INDEX = {"depth",
-                "begin",
-                "end",
-                "excludeFromTimeline",
-                "applicationName",
-                "tab",
-                "id",
-                "parentId",
-                "isMethod",
-                "hasChild",
-                "title",
-                "arguments",
-                "executeTime",
-                "gap",
-                "elapsedTime",
-                "barWidth",
-                "executionMilliseconds",
-                "simpleClassName",
-                "methodType",
-                "apiType",
-                "agent",
-                "isFocused",
-                "hasException",
-                "isAuthorized"
-        };
+    enum Field {
+        depth,
+        begin,
+        end,
+        excludeFromTimeline,
+        applicationName,
+        tab,
+        id,
+        parentId,
+        isMethod,
+        hasChild,
+        title,
+        arguments,
+        executeTime,
+        gap,
+        elapsedTime,
+        barWidth,
+        executionMilliseconds,
+        simpleClassName,
+        methodType,
+        apiType,
+        agent,
+        isFocused,
+        hasException,
+        isAuthorized,
+        agentName,
+        lineNumber,
+        location,
+        applicationServiceType,
+        exceptionChainId;
 
+        private static final Map<String, Integer> MAP = Collections.unmodifiableMap(toNameOrdinalMap());
+
+
+        private static Map<String, Integer> toNameOrdinalMap() {
+            final Map<String, Integer> index = new LinkedHashMap<>();
+            for (Field field : Field.values()) {
+                index.put(field.name(), field.ordinal());
+            }
+            return index;
+        }
+
+        public static Map<String, Integer> getFieldMap() {
+            return MAP;
+        }
+    }
+
+    @JsonSerialize(using = TransactionInfoCallStackSerializer.class)
+    public static class CallStack {
         private String depth = "";
         private long begin;
         private long end;
         private boolean excludeFromTimeline;
         private String applicationName = "";
+        private String applicationServiceType = "";
         private int tab;
         private String id = "";
         private String parentId = "";
@@ -229,15 +241,20 @@ public class TransactionInfoViewModel {
         private String methodType = "";
         private String apiType = "";
         private String agent = "";
+        private String agentName = "";
         private boolean isFocused;
         private boolean hasException;
+        private String exceptionChainId = "";
         private boolean isAuthorized;
+        private int lineNumber;
+        private String location = "";
 
         public CallStack(final Record record, long barRatio) {
             begin = record.getBegin();
             end = record.getBegin() + record.getElapsed();
             excludeFromTimeline = record.isExcludeFromTimeline();
             applicationName = record.getApplicationName();
+            applicationServiceType = record.getApplicationServiceType();
             tab = record.getTab();
             id = String.valueOf(record.getId());
             if (record.getParentId() > 0) {
@@ -245,23 +262,26 @@ public class TransactionInfoViewModel {
             }
             isMethod = record.isMethod();
             hasChild = record.getHasChild();
-            title = StringEscapeUtils.escapeJson(record.getTitle());
-            //arguments = StringEscapeUtils.escapeJson(StringEscapeUtils.escapeHtml4(record.getArguments()));
+            title = record.getTitle();
             arguments = record.getArguments();
             if (record.isMethod()) {
-                executeTime = DateUtils.longToDateStr(record.getBegin(), "HH:mm:ss SSS"); // time format
+                executeTime = DateTimeFormatUtils.formatAbsolute(record.getBegin()); // time format
                 gap = String.valueOf(record.getGap());
                 elapsedTime = String.valueOf(record.getElapsed());
-                barWidth = String.format("%1d", (int)(((end - begin) * barRatio) + 0.9));
+                barWidth = String.format("%1d", (int) (((end - begin) * barRatio) + 0.9));
                 executionMilliseconds = String.valueOf(record.getExecutionMilliseconds());
             }
             simpleClassName = record.getSimpleClassName();
             methodType = String.valueOf(record.getMethodTypeEnum().getCode());
             apiType = record.getApiType();
-            agent = record.getAgent();
+            agent = record.getAgentId();
+            agentName = record.getAgentName();
             isFocused = record.isFocused();
             hasException = record.getHasException();
+            exceptionChainId = record.getExceptionChainId() >= 0 ? String.valueOf(record.getExceptionChainId()) : "";
             isAuthorized = record.isAuthorized();
+            lineNumber = record.getLineNumber();
+            location = record.getLocation();
         }
 
         public String getDepth() {
@@ -282,6 +302,10 @@ public class TransactionInfoViewModel {
 
         public String getApplicationName() {
             return applicationName;
+        }
+
+        public String getApplicationServiceType() {
+            return applicationServiceType;
         }
 
         public int getTab() {
@@ -348,6 +372,10 @@ public class TransactionInfoViewModel {
             return agent;
         }
 
+        public String getAgentName() {
+            return agentName;
+        }
+
         public boolean isFocused() {
             return isFocused;
         }
@@ -355,9 +383,21 @@ public class TransactionInfoViewModel {
         public boolean isHasException() {
             return hasException;
         }
-        
+
+        public String getExceptionChainId() {
+            return exceptionChainId;
+        }
+
         public boolean isAuthorized() {
             return isAuthorized;
+        }
+
+        public int getLineNumber() {
+            return lineNumber;
+        }
+
+        public String getLocation() {
+            return location;
         }
     }
 }

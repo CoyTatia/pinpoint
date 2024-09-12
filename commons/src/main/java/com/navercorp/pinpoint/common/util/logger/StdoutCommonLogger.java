@@ -21,6 +21,7 @@ import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.text.MessageFormat;
+import java.util.Objects;
 
 /**
  * @author Woonduk Kang(emeroad)
@@ -39,20 +40,11 @@ public class StdoutCommonLogger implements CommonLogger {
 
     // for test
     StdoutCommonLogger(String loggerName, PrintStream out, PrintStream err) {
-        if (loggerName == null) {
-            throw new NullPointerException("loggerName must not be null");
-        }
-        if (out == null) {
-            throw new NullPointerException("out must not be null");
-        }
-        if (err == null) {
-            throw new NullPointerException("err must not be null");
-        }
-
+        Objects.requireNonNull(loggerName, "loggerName");
+        this.out = Objects.requireNonNull(out, "out");
+        this.err = Objects.requireNonNull(err, "err");
 //        this.loggerName = loggerName;
         this.messagePattern = "{0,date,yyyy-MM-dd HH:mm:ss} [{1}](" + loggerName + ") {2}{3}";
-        this.out = out;
-        this.err = err;
     }
 
     @Override

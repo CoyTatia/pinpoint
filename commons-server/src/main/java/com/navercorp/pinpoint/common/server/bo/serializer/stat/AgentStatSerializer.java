@@ -21,25 +21,23 @@ import com.navercorp.pinpoint.common.server.bo.codec.stat.AgentStatEncoder;
 import com.navercorp.pinpoint.common.server.bo.serializer.HbaseSerializer;
 import com.navercorp.pinpoint.common.server.bo.serializer.SerializationContext;
 import com.navercorp.pinpoint.common.server.bo.stat.AgentStatDataPoint;
-
-import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.collections4.CollectionUtils;
 import org.apache.hadoop.hbase.HConstants;
 import org.apache.hadoop.hbase.client.Put;
-import org.springframework.util.Assert;
 
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author HyunGil Jeong
  */
-public abstract class AgentStatSerializer<T extends AgentStatDataPoint> implements HbaseSerializer<List<T>, Put> {
+public class AgentStatSerializer<T extends AgentStatDataPoint> implements HbaseSerializer<List<T>, Put> {
 
     private final AgentStatEncoder<T> encoder;
 
-    protected AgentStatSerializer(AgentStatEncoder<T> encoder) {
-        Assert.notNull(encoder, "encoder must not be null");
-        this.encoder = encoder;
+    public AgentStatSerializer(AgentStatEncoder<T> encoder) {
+        this.encoder = Objects.requireNonNull(encoder, "encoder");
     }
 
     @Override

@@ -18,46 +18,6 @@ package com.navercorp.pinpoint.web.scatter;
 /**
  * @author Taejin Koo
  */
-public class Coordinates {
+public record Coordinates(long x, long y) {
 
-    private final long x;
-    private final long y;
-
-    public Coordinates(long x, long y) {
-        this.x = x;
-        this.y = y;
-    }
-
-    @Override
-    public int hashCode() {
-        long result = x;
-        result = 31 * result + y;
-        return (int)(result^(result>>>32));
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-
-        Coordinates that = (Coordinates) o;
-        return x == that.getX() && y == that.getY();
-    }
-
-    public long getX() {
-        return x;
-    }
-
-    public long getY() {
-        return y;
-    }
-
-    @Override
-    public String toString() {
-        return "Coordinates{" + "x=" + x + ", y=" + y + '}';
-    }
 }

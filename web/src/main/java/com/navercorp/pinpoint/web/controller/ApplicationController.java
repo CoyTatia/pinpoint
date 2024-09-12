@@ -17,57 +17,147 @@ package com.navercorp.pinpoint.web.controller;
 
 import com.navercorp.pinpoint.common.PinpointConstants;
 import com.navercorp.pinpoint.common.util.IdValidateUtils;
+import com.navercorp.pinpoint.web.response.CodeResult;
 import com.navercorp.pinpoint.web.service.AgentInfoService;
 import com.navercorp.pinpoint.web.service.ApplicationService;
-import com.navercorp.pinpoint.web.vo.ApplicationAgentHostList;
-import com.navercorp.pinpoint.web.vo.CodeResult;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Controller;
+import com.navercorp.pinpoint.web.service.CacheService;
+import com.navercorp.pinpoint.web.service.CommonService;
+import com.navercorp.pinpoint.web.util.TagApplicationsUtils;
+import com.navercorp.pinpoint.web.view.TagApplications;
+import com.navercorp.pinpoint.web.vo.Application;
+import com.navercorp.pinpoint.web.vo.agent.AgentInfoFilter;
+import com.navercorp.pinpoint.web.vo.agent.AgentInfoFilters;
+import com.navercorp.pinpoint.web.vo.tree.ApplicationAgentHostList;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
+import org.apache.commons.lang3.ObjectUtils;
+import org.springframework.http.HttpStatus;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.time.Period;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * @author Taejin Koo
  */
 
-@Controller
+@RestController
+@RequestMapping("/api")
+@Validated
 public class ApplicationController {
+    public static final int MAX_PAGING_LIMIT = 100;
+    public static final int MAX_DURATION_DAYS = 7;
 
-    private static final int CODE_SUCCESS = 0;
-    private static final int CODE_FAIL = -1;
+    private final AgentInfoService agentInfoService;
 
-    @Autowired
-    private AgentInfoService agentInfoService;
+    private final ApplicationService applicationService;
 
-    @Autowired
-    private ApplicationService applicationService;
+    private final CommonService commonService;
+    private final CacheService cacheService;
 
-    @RequestMapping(value = "/getApplicationHostInfo", method = RequestMethod.GET)
-    @ResponseBody
-    public ApplicationAgentHostList getApplicationHostInfo (
-            @RequestParam(value = "offset", required = false, defaultValue = "1") int offset,
-            @RequestParam(value = "limit", required = false, defaultValue = "100") int limit) throws Exception {
-        return agentInfoService.getApplicationAgentHostList(offset, limit);
+    private static final String KEY = CacheService.DEFAULT_KEY;
+
+    public ApplicationController(AgentInfoService agentInfoService, ApplicationService applicationService, CommonService commonService, CacheService cacheService) {
+        this.agentInfoService = Objects.requireNonNull(agentInfoService, "agentInfoService");
+        this.applicationService = Objects.requireNonNull(applicationService, "applicationService");
+        this.commonService = Objects.requireNonNull(commonService, "commonService");
+        this.cacheService = Objects.requireNonNull(cacheService, "cacheService");
+    }
+
+    @GetMapping(value = "/getApplicationHostInfoV1")
+    public ApplicationAgentHostList getApplicationHostInfoV1(
+            @RequestParam(value = "offset", required = false, defaultValue = "1") @Positive int offset,
+            @RequestParam(value = "limit", required = false, defaultValue = "100") @Positive int limit,
+            @RequestParam(value = "durationDays", required = false) @PositiveOrZero Integer durationDays
+    ) {
+        int maxLimit = Math.min(MAX_PAGING_LIMIT, limit);
+        durationDays = ObjectUtils.defaultIfNull(durationDays, AgentInfoService.NO_DURATION);
+        durationDays = Math.min(MAX_DURATION_DAYS, durationDays);
+
+        Period durationDaysPeriod = Period.ofDays(durationDays);
+        return agentInfoService.getApplicationAgentHostList(offset, maxLimit, durationDaysPeriod);
+    }
+
+    @GetMapping(value = "/getApplicationHostInfo", params = "durationHours")
+    public ApplicationAgentHostList getApplicationHostInfoV2(
+            @RequestParam(value = "offset", required = false, defaultValue = "1") @Positive int offset,
+            @RequestParam(value = "limit", required = false, defaultValue = "100") @Positive int limit,
+            @RequestParam(value = "durationHours", required = false, defaultValue = "0") @PositiveOrZero int durationHours,
+            @RequestParam(value = "useCache", required = false, defaultValue = "true") Boolean useCache,
+            @RequestParam(value = "isContainer", required = false) Boolean isContainer
+    ) {
+        int maxLimit = Math.min(MAX_PAGING_LIMIT, limit);
+        durationHours = Math.min(MAX_DURATION_DAYS * 24, durationHours);
+        AgentInfoFilter agentInfoFilter = createAgentInfoFilter(isContainer);
+
+        List<Application> applicationList = getApplicationList(useCache);
+
+        return agentInfoService.getApplicationAgentHostList(offset, maxLimit, durationHours, applicationList, agentInfoFilter);
+    }
+
+    @GetMapping(value = "/getApplicationHostInfo")
+    public ApplicationAgentHostList getApplicationHostInfoDaysV2(
+            @RequestParam(value = "offset", required = false, defaultValue = "1") @Positive int offset,
+            @RequestParam(value = "limit", required = false, defaultValue = "100") @Positive int limit,
+            @RequestParam(value = "durationDays", required = false, defaultValue = "0") @PositiveOrZero int durationDays,
+            @RequestParam(value = "useCache", required = false, defaultValue = "true") Boolean useCache,
+            @RequestParam(value = "isContainer", required = false) Boolean isContainer
+    ) {
+        int maxLimit = Math.min(MAX_PAGING_LIMIT, limit);
+        int durationHours = Math.min(MAX_DURATION_DAYS * 24, durationDays * 24);
+        return getApplicationHostInfoV2(offset, maxLimit, durationHours, useCache, isContainer);
+    }
+
+    private AgentInfoFilter createAgentInfoFilter(Boolean isContainer) {
+        if (isContainer != null) {
+            return AgentInfoFilters.isContainer(isContainer);
+        }
+        return AgentInfoFilters.acceptAll();
+    }
+
+    private List<Application> getApplicationList(boolean useCache) {
+        if (!useCache) {
+            return commonService.selectAllApplicationNames();
+        }
+
+        final TagApplications cachedTagApplications = cacheService.get(KEY);
+        if (cachedTagApplications != null) {
+            return cachedTagApplications.getApplicationList();
+        }
+        final List<Application> applicationList = commonService.selectAllApplicationNames();
+        final TagApplications tagApplications = TagApplicationsUtils.wrapApplicationList(applicationList);
+        cacheService.put(KEY, tagApplications);
+        return applicationList;
     }
 
     @RequestMapping(value = "/isAvailableApplicationName")
-    @ResponseBody
-    public CodeResult isAvailableApplicationName(@RequestParam("applicationName") String applicationName) {
-        if (!IdValidateUtils.checkLength(applicationName, PinpointConstants.APPLICATION_NAME_MAX_LEN)) {
-            return new CodeResult(CODE_FAIL, "length range is 1 ~ 24");
+    public CodeResult<String> isAvailableApplicationName(
+            @RequestParam("applicationName") @NotBlank String applicationName
+    ) {
+        final IdValidateUtils.CheckResult result =
+                IdValidateUtils.checkId(applicationName, PinpointConstants.APPLICATION_NAME_MAX_LEN);
+        if (result == IdValidateUtils.CheckResult.FAIL_LENGTH) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "length range is 1 ~ 24");
         }
-
-        if (!IdValidateUtils.validateId(applicationName, PinpointConstants.APPLICATION_NAME_MAX_LEN)) {
-            return new CodeResult(CODE_FAIL, "invalid pattern(" + IdValidateUtils.ID_PATTERN_VALUE + ")");
+        if (result == IdValidateUtils.CheckResult.FAIL_PATTERN) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "invalid pattern(" + IdValidateUtils.ID_PATTERN_VALUE + ")"
+            );
         }
 
         if (applicationService.isExistApplicationName(applicationName)) {
-            return new CodeResult(CODE_FAIL, "already exist applicationName");
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "applicationName already exists");
         }
 
-        return new CodeResult(CODE_SUCCESS, "OK");
+        return CodeResult.ok("OK");
     }
 
 }

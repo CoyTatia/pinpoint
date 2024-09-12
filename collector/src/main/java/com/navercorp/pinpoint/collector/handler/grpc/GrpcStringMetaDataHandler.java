@@ -16,10 +16,10 @@
 
 package com.navercorp.pinpoint.collector.handler.grpc;
 
+import com.google.protobuf.GeneratedMessageV3;
 import com.navercorp.pinpoint.collector.handler.RequestResponseHandler;
 import com.navercorp.pinpoint.collector.service.StringMetaDataService;
 import com.navercorp.pinpoint.common.server.bo.StringMetaDataBo;
-import com.navercorp.pinpoint.grpc.AgentHeaderFactory;
 import com.navercorp.pinpoint.grpc.Header;
 import com.navercorp.pinpoint.grpc.MessageFormatUtils;
 import com.navercorp.pinpoint.grpc.server.ServerContext;
@@ -27,28 +27,38 @@ import com.navercorp.pinpoint.grpc.trace.PResult;
 import com.navercorp.pinpoint.grpc.trace.PStringMetaData;
 import com.navercorp.pinpoint.io.request.ServerRequest;
 import com.navercorp.pinpoint.io.request.ServerResponse;
+import com.navercorp.pinpoint.thrift.io.DefaultTBaseLocator;
 import io.grpc.Status;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Service;
+
+import java.util.Objects;
 
 /**
  * @author emeroad
  */
 @Service
-public class GrpcStringMetaDataHandler implements RequestResponseHandler {
-    private final Logger logger = LoggerFactory.getLogger(getClass());
+public class GrpcStringMetaDataHandler implements RequestResponseHandler<GeneratedMessageV3, GeneratedMessageV3> {
+    private final Logger logger = LogManager.getLogger(getClass());
     private final boolean isDebug = logger.isDebugEnabled();
 
-    @Autowired
-    private StringMetaDataService stringMetaDataService;
+    private final StringMetaDataService stringMetaDataService;
+
+    public GrpcStringMetaDataHandler(StringMetaDataService stringMetaDataService) {
+        this.stringMetaDataService = Objects.requireNonNull(stringMetaDataService, "stringMetaDataService");
+    }
 
     @Override
-    public void handleRequest(ServerRequest serverRequest, ServerResponse serverResponse) {
-        final Object data = serverRequest.getData();
-        if (data instanceof PStringMetaData) {
-            Object result = handleStringMetaData((PStringMetaData) data);
+    public int type() {
+        return DefaultTBaseLocator.STRINGMETADATA;
+    }
+
+    @Override
+    public void handleRequest(ServerRequest<GeneratedMessageV3> serverRequest, ServerResponse<GeneratedMessageV3> serverResponse) {
+        final GeneratedMessageV3 data = serverRequest.getData();
+        if (data instanceof PStringMetaData stringMetaData) {
+            PResult result = handleStringMetaData(stringMetaData);
             serverResponse.write(result);
         } else {
             logger.warn("Invalid request type. serverRequest={}", serverRequest);
@@ -56,7 +66,7 @@ public class GrpcStringMetaDataHandler implements RequestResponseHandler {
         }
     }
 
-    private Object handleStringMetaData(final PStringMetaData stringMetaData) {
+    private PResult handleStringMetaData(final PStringMetaData stringMetaData) {
         if (logger.isDebugEnabled()) {
             logger.debug("Handle PStringMetaData={}", MessageFormatUtils.debugLog(stringMetaData));
         }
@@ -65,8 +75,12 @@ public class GrpcStringMetaDataHandler implements RequestResponseHandler {
             final Header agentInfo = ServerContext.getAgentInfo();
             final String agentId = agentInfo.getAgentId();
             final long agentStartTime = agentInfo.getAgentStartTime();
-            final StringMetaDataBo stringMetaDataBo = new StringMetaDataBo(agentId, agentStartTime, stringMetaData.getStringId());
-            stringMetaDataBo.setStringValue(stringMetaData.getStringValue());
+
+            final String stringValue = stringMetaData.getStringValue();
+
+            final StringMetaDataBo stringMetaDataBo = new StringMetaDataBo(agentId, agentStartTime,
+                    stringMetaData.getStringId(), stringValue);
+
             stringMetaDataService.insert(stringMetaDataBo);
             return PResult.newBuilder().setSuccess(true).build();
         } catch (Exception e) {

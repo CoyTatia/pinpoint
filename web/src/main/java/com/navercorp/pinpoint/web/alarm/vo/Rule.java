@@ -16,25 +16,31 @@
 
 package com.navercorp.pinpoint.web.alarm.vo;
 
+import com.navercorp.pinpoint.web.vo.RuleInterface;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import org.apache.commons.lang3.StringUtils;
+
 /**
  * @author minwoo.jung
  */
-public class Rule {
+public class Rule implements RuleInterface {
 
     private String ruleId;
-    private String applicationId;
+    @NotBlank private String applicationId;
     private String serviceType;
-    private String checkerName;
-    private Integer threshold;
-    private String userGroupId;
+    @NotBlank private String checkerName;
+    @NotNull private Integer threshold;
+    @NotBlank private String userGroupId;
     private boolean smsSend;
     private boolean emailSend;
+    private boolean webhookSend;
     private String notes;
 
     public Rule() {
     }
 
-    public Rule(String applicationId, String serviceType, String checkerName, Integer Threshold, String userGroupId, boolean smsSend, boolean emailSend, String notes) {
+    public Rule(String applicationId, String serviceType, String checkerName, Integer Threshold, String userGroupId, boolean smsSend, boolean emailSend, boolean webhookSend, String notes) {
         this.applicationId = applicationId;
         this.serviceType = serviceType;
         this.checkerName = checkerName;
@@ -42,6 +48,7 @@ public class Rule {
         this.userGroupId = userGroupId;
         this.smsSend = smsSend;
         this.emailSend = emailSend;
+        this.webhookSend = webhookSend;
         this.notes = notes;
     }
 
@@ -81,7 +88,7 @@ public class Rule {
         return userGroupId;
     }
 
-    public void setuserGroupId(String userGroupId) {
+    public void setUserGroupId(String userGroupId) {
         this.userGroupId = userGroupId;
     }
 
@@ -100,6 +107,14 @@ public class Rule {
     public void setEmailSend(boolean emailSend) {
         this.emailSend = emailSend;
     }
+    
+    public boolean isWebhookSend() {
+        return webhookSend;
+    }
+    
+    public void setWebhookSend(boolean webhookSend) {
+        this.webhookSend = webhookSend;
+    }
 
     public String getRuleId() {
         return ruleId;
@@ -117,6 +132,23 @@ public class Rule {
         this.notes = notes;
     }
 
+    public static boolean isRuleInvalidForPost(Rule rule) {
+        return StringUtils.isEmpty(rule.getApplicationId()) ||
+                StringUtils.isEmpty(rule.getCheckerName()) ||
+                StringUtils.isEmpty(rule.getUserGroupId()) ||
+                rule.getThreshold() == null;
+    }
+
+
+    public static boolean isRuleInvalid(Rule rule) {
+        return StringUtils.isEmpty(rule.getRuleId()) ||
+                StringUtils.isEmpty(rule.getApplicationId()) ||
+                StringUtils.isEmpty(rule.getCheckerName()) ||
+                StringUtils.isEmpty(rule.getUserGroupId()) ||
+                rule.getThreshold() == null;
+    }
+
+
     @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder("Rule{");
@@ -128,6 +160,7 @@ public class Rule {
         sb.append(", userGroupId='").append(userGroupId).append('\'');
         sb.append(", smsSend=").append(smsSend);
         sb.append(", emailSend=").append(emailSend);
+        sb.append(", webhookSend=").append(webhookSend);
         sb.append(", notes='").append(notes).append('\'');
         sb.append('}');
         return sb.toString();

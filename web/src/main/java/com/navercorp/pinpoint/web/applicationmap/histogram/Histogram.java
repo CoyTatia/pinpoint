@@ -16,19 +16,27 @@
 
 package com.navercorp.pinpoint.web.applicationmap.histogram;
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.navercorp.pinpoint.common.trace.HistogramSchema;
 import com.navercorp.pinpoint.common.trace.HistogramSlot;
 import com.navercorp.pinpoint.common.trace.ServiceType;
 import com.navercorp.pinpoint.common.trace.SlotType;
 import com.navercorp.pinpoint.web.view.HistogramSerializer;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.util.Collection;
+import java.util.Objects;
 
 /**
  * @author emeroad
  * @author netspider
+ * @author jaehong.kim
  */
 @JsonSerialize(using = HistogramSerializer.class)
-public class Histogram {
+public class Histogram implements StatisticsHistogram {
+
+    private static final Logger LOGGER = LogManager.getLogger(Histogram.class);
 
     private final HistogramSchema schema;
 
@@ -41,30 +49,44 @@ public class Histogram {
     private long normalErrorCount;
     private long slowErrorCount;
     private long verySlowErrorCount;
+    private long sumElapsed;
+    private long maxElapsed;
+
+    private long pingCount; // for internal
 
     public Histogram(ServiceType serviceType) {
-        if (serviceType == null) {
-            throw new NullPointerException("serviceType must not be null");
-        }
+        Objects.requireNonNull(serviceType, "serviceType");
         this.schema = serviceType.getHistogramSchema();
     }
 
     public Histogram(HistogramSchema schema) {
-        if (schema == null) {
-            throw new NullPointerException("schema must not be null");
-        }
-        this.schema = schema;
+        this.schema = Objects.requireNonNull(schema, "schema");
     }
 
     public void addCallCountByElapsedTime(int elapsedTime, boolean error) {
         final HistogramSlot histogramSlot = this.schema.findHistogramSlot(elapsedTime, error);
         short slotTime = histogramSlot.getSlotTime();
+        this.sumElapsed += elapsedTime;
+        updateMaxElapsed(elapsedTime);
         addCallCount(slotTime, 1);
     }
 
     // TODO one may extract slot number from this class
     public void addCallCount(final short slotTime, final long count) {
         final HistogramSchema schema = this.schema;
+
+        if (slotTime == schema.getSumStatSlot().getSlotTime()) {
+            this.sumElapsed += count;
+            return;
+        }
+        if (slotTime == schema.getMaxStatSlot().getSlotTime()) {
+            updateMaxElapsed(count);
+            return;
+        }
+        if (slotTime == schema.getPingSlot().getSlotTime()) { // ping
+            this.pingCount += count;
+            return;
+        }
 
         if (slotTime <= schema.getVerySlowErrorSlot().getSlotTime()) {
             this.verySlowErrorCount += count;
@@ -87,7 +109,7 @@ public class Histogram {
             return;
         }
 
-        if (slotTime <= schema.getErrorSlot().getSlotTime()) {
+        if (slotTime <= schema.getErrorSlot().getSlotTime()) { // -1 is error
             this.errorCount += count;
             return;
         }
@@ -112,7 +134,13 @@ public class Histogram {
             return;
         }
 
-        throw new IllegalArgumentException("slot not found slotTime=" + slotTime + ", count=" + count + ", schema=" + schema);
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debug("slot not found slotTime=" + slotTime + ", count=" + count + ", schema=" + schema);
+        }
+    }
+
+    private void updateMaxElapsed(long elapsedTime) {
+        this.maxElapsed = Math.max(this.maxElapsed, elapsedTime);
     }
 
     public HistogramSchema getHistogramSchema() {
@@ -120,6 +148,7 @@ public class Histogram {
     }
 
     public long getTotalErrorCount() {
+        // Skip ping count
         return errorCount + fastErrorCount + normalErrorCount + slowErrorCount + verySlowErrorCount;
     }
 
@@ -159,6 +188,10 @@ public class Histogram {
         return verySlowErrorCount;
     }
 
+    public long getPingCount() {
+        return pingCount;
+    }
+
     public long getTotalCount() {
         return errorCount + fastCount + fastErrorCount + normalCount + normalErrorCount + slowCount + slowErrorCount + verySlowCount + verySlowErrorCount;
     }
@@ -167,39 +200,51 @@ public class Histogram {
         return fastCount + normalCount + slowCount + verySlowCount;
     }
 
-    public long getCount(SlotType slotType) {
-        if (slotType == null) {
-            throw new NullPointerException("slotType must not be null");
-        }
+    public long getSumElapsed() {
+        return sumElapsed;
+    }
 
-        switch (slotType) {
-            case FAST:
-                return fastCount;
-            case FAST_ERROR:
-                return fastErrorCount;
-            case NORMAL:
-                return normalCount;
-            case NORMAL_ERROR:
-                return normalErrorCount;
-            case SLOW:
-                return slowCount;
-            case SLOW_ERROR:
-                return slowErrorCount;
-            case VERY_SLOW:
-                return verySlowCount;
-            case VERY_SLOW_ERROR:
-                return verySlowErrorCount;
-            case ERROR:
+    public long getMaxElapsed() {
+        return maxElapsed;
+    }
+
+    public long getAvgElapsed() {
+        final long totalCount = getTotalCount();
+        return totalCount > 0 ? sumElapsed / totalCount : 0L;
+    }
+
+    public long getCount(SlotType slotType) {
+        Objects.requireNonNull(slotType, "slotType");
+
+        return switch (slotType) {
+            case FAST -> fastCount;
+            case FAST_ERROR -> fastErrorCount;
+            case NORMAL -> normalCount;
+            case NORMAL_ERROR -> normalErrorCount;
+            case SLOW -> slowCount;
+            case SLOW_ERROR -> slowErrorCount;
+            case VERY_SLOW -> verySlowCount;
+            case VERY_SLOW_ERROR -> verySlowErrorCount;
+            case ERROR ->
                 // for backward compatibility.
-                return errorCount + fastErrorCount + normalErrorCount + slowErrorCount + verySlowErrorCount;
+                    errorCount + fastErrorCount + normalErrorCount + slowErrorCount + verySlowErrorCount;
+            case SUM_STAT -> sumElapsed;
+            case MAX_STAT -> maxElapsed;
+            case PING -> pingCount;
+            default -> throw new IllegalArgumentException("slotType:" + slotType);
+        };
+    }
+
+    public void addAll(final Collection<? extends Histogram> histograms) {
+        Objects.requireNonNull(histograms, "histograms");
+        for (Histogram histogram : histograms) {
+            add(histogram);
         }
-        throw new IllegalArgumentException("slotType:" + slotType);
     }
 
     public void add(final Histogram histogram) {
-        if (histogram == null) {
-            throw new NullPointerException("histogram must not be null");
-        }
+        Objects.requireNonNull(histogram, "histogram");
+
         if (this.schema != histogram.schema) {
             throw new IllegalArgumentException("schema not equals. this=" + this + ", histogram=" + histogram);
 
@@ -213,6 +258,9 @@ public class Histogram {
         this.slowErrorCount += histogram.getSlowErrorCount();
         this.verySlowCount += histogram.getVerySlowCount();
         this.verySlowErrorCount += histogram.getVerySlowErrorCount();
+        this.sumElapsed += histogram.getSumElapsed();
+        updateMaxElapsed(histogram.getMaxElapsed());
+        this.pingCount += histogram.getPingCount();
     }
 
     @Override
@@ -234,18 +282,20 @@ public class Histogram {
 
     @Override
     public String toString() {
-        final StringBuilder sb = new StringBuilder("Histogram{");
-        sb.append("schema=").append(schema);
-        sb.append(", fastCount=").append(fastCount);
-        sb.append(", normalCount=").append(normalCount);
-        sb.append(", slowCount=").append(slowCount);
-        sb.append(", verySlowCount=").append(verySlowCount);
-        sb.append(", errorCount=").append(errorCount);
-        sb.append(", fastErrorCount=").append(fastErrorCount);
-        sb.append(", normalErrorCount=").append(normalErrorCount);
-        sb.append(", slowErrorCount=").append(slowErrorCount);
-        sb.append(", verySlowErrorCount=").append(verySlowErrorCount);
-        sb.append('}');
-        return sb.toString();
+        return "Histogram{" +
+                "schema=" + schema +
+                ", fastCount=" + fastCount +
+                ", normalCount=" + normalCount +
+                ", slowCount=" + slowCount +
+                ", verySlowCount=" + verySlowCount +
+                ", errorCount=" + errorCount +
+                ", fastErrorCount=" + fastErrorCount +
+                ", normalErrorCount=" + normalErrorCount +
+                ", slowErrorCount=" + slowErrorCount +
+                ", verySlowErrorCount=" + verySlowErrorCount +
+                ", sumElapsed=" + sumElapsed +
+                ", maxElapsed=" + maxElapsed +
+                ", pingCount=" + pingCount +
+                '}';
     }
 }

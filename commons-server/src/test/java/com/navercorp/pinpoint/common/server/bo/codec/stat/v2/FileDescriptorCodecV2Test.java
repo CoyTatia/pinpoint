@@ -18,26 +18,26 @@ package com.navercorp.pinpoint.common.server.bo.codec.stat.v2;
 
 import com.navercorp.pinpoint.common.server.bo.codec.stat.AgentStatCodec;
 import com.navercorp.pinpoint.common.server.bo.codec.stat.AgentStatCodecTestBase;
+import com.navercorp.pinpoint.common.server.bo.codec.stat.CodecTestConfig;
 import com.navercorp.pinpoint.common.server.bo.codec.stat.TestAgentStatFactory;
-import com.navercorp.pinpoint.common.server.bo.serializer.stat.AgentStatUtils;
 import com.navercorp.pinpoint.common.server.bo.stat.FileDescriptorBo;
-import org.junit.Assert;
-import org.junit.runner.RunWith;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.ContextConfiguration;
-import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
 
 import java.util.List;
 
 /**
  * @author Roy Kim
  */
-@RunWith(SpringJUnit4ClassRunner.class)
-@ContextConfiguration("classpath:applicationContext-test.xml")
+@ExtendWith(SpringExtension.class)
+@ContextConfiguration(classes = CodecTestConfig.class)
 public class FileDescriptorCodecV2Test extends AgentStatCodecTestBase<FileDescriptorBo> {
 
     @Autowired
-    private FileDescriptorCodecV2 fileDescriptorCodecV2;
+    private AgentStatCodecV2<FileDescriptorBo> codec;
 
     @Override
     protected List<FileDescriptorBo> createAgentStats(String agentId, long startTimestamp, long initialTimestamp) {
@@ -46,15 +46,15 @@ public class FileDescriptorCodecV2Test extends AgentStatCodecTestBase<FileDescri
 
     @Override
     protected AgentStatCodec<FileDescriptorBo> getCodec() {
-        return fileDescriptorCodecV2;
+        return codec;
     }
 
     @Override
     protected void verify(FileDescriptorBo expected, FileDescriptorBo actual) {
-        Assert.assertEquals("agentId", expected.getAgentId(), actual.getAgentId());
-        Assert.assertEquals("startTimestamp", expected.getStartTimestamp(), actual.getStartTimestamp());
-        Assert.assertEquals("timestamp", expected.getTimestamp(), actual.getTimestamp());
-        Assert.assertEquals("agentStatType", expected.getAgentStatType(), actual.getAgentStatType());
-        Assert.assertEquals("openFileDescriptor", expected.getOpenFileDescriptorCount(), actual.getOpenFileDescriptorCount());
+        Assertions.assertEquals(expected.getAgentId(), actual.getAgentId(), "agentId");
+        Assertions.assertEquals(expected.getStartTimestamp(), actual.getStartTimestamp(), "startTimestamp");
+        Assertions.assertEquals(expected.getTimestamp(), actual.getTimestamp(), "timestamp");
+        Assertions.assertEquals(expected.getAgentStatType(), actual.getAgentStatType(), "agentStatType");
+        Assertions.assertEquals(expected.getOpenFileDescriptorCount(), actual.getOpenFileDescriptorCount(), "openFileDescriptor");
     }
 }

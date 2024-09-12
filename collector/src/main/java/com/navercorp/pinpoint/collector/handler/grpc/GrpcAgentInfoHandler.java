@@ -16,6 +16,7 @@
 
 package com.navercorp.pinpoint.collector.handler.grpc;
 
+import com.google.protobuf.GeneratedMessageV3;
 import com.navercorp.pinpoint.collector.handler.SimpleAndRequestResponseHandler;
 import com.navercorp.pinpoint.collector.mapper.grpc.GrpcAgentInfoBoMapper;
 import com.navercorp.pinpoint.collector.service.AgentInfoService;
@@ -27,32 +28,42 @@ import com.navercorp.pinpoint.grpc.trace.PAgentInfo;
 import com.navercorp.pinpoint.grpc.trace.PResult;
 import com.navercorp.pinpoint.io.request.ServerRequest;
 import com.navercorp.pinpoint.io.request.ServerResponse;
+import com.navercorp.pinpoint.thrift.io.DefaultTBaseLocator;
 import io.grpc.Status;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.stereotype.Service;
+
+import java.util.Objects;
 
 /**
  * @author emeroad
  * @author koo.taejin
  */
 @Service
-public class GrpcAgentInfoHandler implements SimpleAndRequestResponseHandler {
-    private final Logger logger = LoggerFactory.getLogger(this.getClass().getName());
+public class GrpcAgentInfoHandler implements SimpleAndRequestResponseHandler<GeneratedMessageV3, GeneratedMessageV3> {
+    private final Logger logger = LogManager.getLogger(this.getClass());
     private final boolean isDebug = logger.isDebugEnabled();
 
-    @Autowired
-    private AgentInfoService agentInfoService;
+    private final AgentInfoService agentInfoService;
 
-    @Autowired
-    private GrpcAgentInfoBoMapper agentInfoBoMapper;
+    private final GrpcAgentInfoBoMapper agentInfoBoMapper;
+
+    public GrpcAgentInfoHandler(AgentInfoService agentInfoService, GrpcAgentInfoBoMapper agentInfoBoMapper) {
+        this.agentInfoService = Objects.requireNonNull(agentInfoService, "agentInfoService");
+        this.agentInfoBoMapper = Objects.requireNonNull(agentInfoBoMapper, "agentInfoBoMapper");
+    }
 
     @Override
-    public void handleSimple(ServerRequest serverRequest) {
-        final Object data = serverRequest.getData();
-        if (data instanceof PAgentInfo) {
-            handleAgentInfo((PAgentInfo) data);
+    public int type() {
+        return DefaultTBaseLocator.AGENT_INFO;
+    }
+
+    @Override
+    public void handleSimple(ServerRequest<GeneratedMessageV3> serverRequest) {
+        final GeneratedMessageV3 data = serverRequest.getData();
+        if (data instanceof PAgentInfo agentInfo) {
+            handleAgentInfo(agentInfo);
         } else {
             logger.warn("Invalid request type. serverRequest={}", serverRequest);
             throw Status.INTERNAL.withDescription("Bad Request(invalid request type)").asRuntimeException();
@@ -60,10 +71,10 @@ public class GrpcAgentInfoHandler implements SimpleAndRequestResponseHandler {
     }
 
     @Override
-    public void handleRequest(ServerRequest serverRequest, ServerResponse serverResponse) {
-        final Object data = serverRequest.getData();
-        if (data instanceof PAgentInfo) {
-            final PResult result = handleAgentInfo((PAgentInfo) data);
+    public void handleRequest(ServerRequest<GeneratedMessageV3> serverRequest, ServerResponse<GeneratedMessageV3> serverResponse) {
+        final GeneratedMessageV3 data = serverRequest.getData();
+        if (data instanceof PAgentInfo agentInfo) {
+            final PResult result = handleAgentInfo(agentInfo);
             serverResponse.write(result);
         } else {
             logger.warn("Invalid request type. serverRequest={}", serverRequest);

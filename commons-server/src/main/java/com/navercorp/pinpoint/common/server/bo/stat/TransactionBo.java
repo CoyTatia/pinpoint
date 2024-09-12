@@ -23,6 +23,7 @@ public class TransactionBo implements AgentStatDataPoint {
 
     public static final long UNCOLLECTED_VALUE = -1;
 
+    private String applicationName;
     private String agentId;
     private long startTimestamp;
     private long timestamp;
@@ -67,6 +68,16 @@ public class TransactionBo implements AgentStatDataPoint {
     @Override
     public AgentStatType getAgentStatType() {
         return AgentStatType.TRANSACTION;
+    }
+
+    @Override
+    public String getApplicationName() {
+        return this.applicationName;
+    }
+
+    @Override
+    public void setApplicationName(String applicationName) {
+        this.applicationName = applicationName;
     }
 
     public long getCollectInterval() {
@@ -162,18 +173,17 @@ public class TransactionBo implements AgentStatDataPoint {
 
     @Override
     public String toString() {
-        final StringBuilder sb = new StringBuilder("TransactionBo{");
-        sb.append("agentId='").append(agentId).append('\'');
-        sb.append(", startTimestamp=").append(startTimestamp);
-        sb.append(", timestamp=").append(timestamp);
-        sb.append(", collectInterval=").append(collectInterval);
-        sb.append(", sampledNewCount=").append(sampledNewCount);
-        sb.append(", sampledContinuationCount=").append(sampledContinuationCount);
-        sb.append(", unsampledNewCount=").append(unsampledNewCount);
-        sb.append(", unsampledContinuationCount=").append(unsampledContinuationCount);
-        sb.append(", skippedNewSkipCount=").append(skippedNewSkipCount);
-        sb.append(", skippedContinuationCount=").append(skippedContinuationCount);
-        sb.append('}');
-        return sb.toString();
+        return "TransactionBo{" +
+                "agentId='" + agentId + '\'' +
+                ", startTimestamp=" + startTimestamp +
+                ", timestamp=" + timestamp +
+                ", collectInterval=" + collectInterval +
+                ", sampledNewCount=" + sampledNewCount +
+                ", sampledContinuationCount=" + sampledContinuationCount +
+                ", unsampledNewCount=" + unsampledNewCount +
+                ", unsampledContinuationCount=" + unsampledContinuationCount +
+                ", skippedNewSkipCount=" + skippedNewSkipCount +
+                ", skippedContinuationCount=" + skippedContinuationCount +
+                '}';
     }
 }

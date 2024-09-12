@@ -1,11 +1,11 @@
 /*
- * Copyright 2014 NAVER Corp.
+ * Copyright 2019 NAVER Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,16 +22,17 @@ import com.navercorp.pinpoint.rpc.server.DefaultPinpointServer;
 import com.navercorp.pinpoint.rpc.util.PinpointRPCTestUtils;
 import com.navercorp.pinpoint.test.server.TestPinpointServerAcceptor;
 import com.navercorp.pinpoint.test.server.TestServerMessageListenerFactory;
-import com.navercorp.pinpoint.test.utils.TestAwaitTaskUtils;
-import com.navercorp.pinpoint.test.utils.TestAwaitUtils;
+import com.navercorp.pinpoint.testcase.util.SocketUtils;
+import org.awaitility.Awaitility;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelFuture;
-import org.junit.Assert;
-import org.junit.Test;
-import org.springframework.util.SocketUtils;
+import org.junit.jupiter.api.Test;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.util.Objects;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * @author Taejin Koo
@@ -39,11 +40,10 @@ import java.net.SocketAddress;
 public class PinpointClientStateTest {
 
     private final TestServerMessageListenerFactory testServerMessageListenerFactory = new TestServerMessageListenerFactory(TestServerMessageListenerFactory.HandshakeType.DUPLEX);
-    private final TestAwaitUtils awaitUtils = new TestAwaitUtils(100, 2000);
 
     @Test
     public void connectFailedStateTest() throws InterruptedException {
-        PinpointClientFactory clientFactory = null;
+        DefaultPinpointClientFactory clientFactory = null;
         DefaultPinpointClientHandler handler = null;
         try {
             int availableTcpPort = SocketUtils.findAvailableTcpPort(47000);
@@ -63,7 +63,7 @@ public class PinpointClientStateTest {
         TestPinpointServerAcceptor testPinpointServerAcceptor = new TestPinpointServerAcceptor(testServerMessageListenerFactory);
         int bindPort = testPinpointServerAcceptor.bind();
 
-        PinpointClientFactory clientSocketFactory = null;
+        DefaultPinpointClientFactory clientSocketFactory = null;
         DefaultPinpointClientHandler handler = null;
         try {
             clientSocketFactory = PinpointRPCTestUtils.createClientFactory(PinpointRPCTestUtils.getParams(), testServerMessageListenerFactory.create());
@@ -84,7 +84,7 @@ public class PinpointClientStateTest {
         TestPinpointServerAcceptor testPinpointServerAcceptor = new TestPinpointServerAcceptor(testServerMessageListenerFactory);
         int bindPort = testPinpointServerAcceptor.bind();
 
-        PinpointClientFactory clientFactory = null;
+        DefaultPinpointClientFactory clientFactory = null;
         DefaultPinpointClientHandler handler = null;
         try {
             clientFactory = PinpointRPCTestUtils.createClientFactory(PinpointRPCTestUtils.getParams(), testServerMessageListenerFactory.create());
@@ -105,7 +105,7 @@ public class PinpointClientStateTest {
         TestPinpointServerAcceptor testPinpointServerAcceptor = new TestPinpointServerAcceptor(testServerMessageListenerFactory);
         int bindPort = testPinpointServerAcceptor.bind();
 
-        PinpointClientFactory clientFactory = null;
+        DefaultPinpointClientFactory clientFactory = null;
         DefaultPinpointClientHandler handler = null;
         try {
             clientFactory = PinpointRPCTestUtils.createClientFactory(PinpointRPCTestUtils.getParams(), testServerMessageListenerFactory.create());
@@ -126,7 +126,7 @@ public class PinpointClientStateTest {
         TestPinpointServerAcceptor testPinpointServerAcceptor = new TestPinpointServerAcceptor(testServerMessageListenerFactory);
         int bindPort = testPinpointServerAcceptor.bind();
 
-        PinpointClientFactory clientFactory = null;
+        DefaultPinpointClientFactory clientFactory = null;
         DefaultPinpointClientHandler handler = null;
         try {
             clientFactory = PinpointRPCTestUtils.createClientFactory(PinpointRPCTestUtils.getParams(), testServerMessageListenerFactory.create());
@@ -144,31 +144,22 @@ public class PinpointClientStateTest {
     }
 
     private void assertHandlerState(final SocketStateCode stateCode, final DefaultPinpointClientHandler handler) {
-        boolean passed = awaitUtils.await(new TestAwaitTaskUtils() {
-            @Override
-            public boolean checkCompleted() {
-                return handler.getCurrentStateCode() == stateCode;
-            }
-        });
-
-        Assert.assertTrue(passed);
+        Awaitility.await()
+                .untilAsserted(() -> assertThat(handler.getCurrentStateCode()).isEqualTo(stateCode));
     }
 
-    private DefaultPinpointClientHandler connect(PinpointClientFactory factory, int port) {
+    private DefaultPinpointClientHandler connect(DefaultPinpointClientFactory factory, int port) {
         ChannelFuture future = factory.reconnect(new InetSocketAddress("127.0.0.1", port));
         PinpointClientHandler handler = getSocketHandler(future, new InetSocketAddress("127.0.0.1", port));
         return (DefaultPinpointClientHandler) handler;
     }
 
     PinpointClientHandler getSocketHandler(ChannelFuture channelConnectFuture, SocketAddress address) {
-        if (address == null) {
-            throw new NullPointerException("address");
-        }
+        Objects.requireNonNull(address, "address");
 
         Channel channel = channelConnectFuture.getChannel();
-        PinpointClientHandler pinpointClientHandler = (PinpointClientHandler) channel.getPipeline().getLast();
 
-        return pinpointClientHandler;
+        return (PinpointClientHandler) channel.getPipeline().getLast();
     }
 
     private void closeHandler(DefaultPinpointClientHandler handler) {

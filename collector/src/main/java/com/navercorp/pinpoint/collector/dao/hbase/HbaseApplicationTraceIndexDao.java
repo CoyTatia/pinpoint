@@ -17,80 +17,110 @@
 package com.navercorp.pinpoint.collector.dao.hbase;
 
 import com.navercorp.pinpoint.collector.dao.ApplicationTraceIndexDao;
+import com.navercorp.pinpoint.collector.util.CollectorUtils;
 import com.navercorp.pinpoint.common.buffer.AutomaticBuffer;
 import com.navercorp.pinpoint.common.buffer.Buffer;
 import com.navercorp.pinpoint.common.hbase.HbaseColumnFamily;
-import com.navercorp.pinpoint.common.hbase.HbaseOperations2;
-import com.navercorp.pinpoint.common.hbase.HbaseTableConstatns;
+import com.navercorp.pinpoint.common.hbase.HbaseTableConstants;
+import com.navercorp.pinpoint.common.hbase.TableNameProvider;
+import com.navercorp.pinpoint.common.hbase.async.HbasePutWriter;
 import com.navercorp.pinpoint.common.server.bo.SpanBo;
-import com.navercorp.pinpoint.common.server.util.AcceptedTimeService;
+import com.navercorp.pinpoint.common.server.bo.serializer.RowKeyEncoder;
 import com.navercorp.pinpoint.common.server.util.SpanUtils;
-
-import com.sematext.hbase.wd.AbstractRowKeyDistributor;
 import org.apache.hadoop.hbase.TableName;
 import org.apache.hadoop.hbase.client.Put;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Repository;
 
+import java.util.Objects;
+
+
 /**
  * find traceids by application name
- * 
+ *
  * @author netspider
  * @author emeroad
  */
 @Repository
-public class HbaseApplicationTraceIndexDao extends AbstractHbaseDao implements ApplicationTraceIndexDao {
+public class HbaseApplicationTraceIndexDao implements ApplicationTraceIndexDao {
 
-    @Autowired
-    private HbaseOperations2 hbaseTemplate;
+    private final Logger logger = LogManager.getLogger(this.getClass());
 
-    @Autowired
-    private AcceptedTimeService acceptedTimeService;
+    private static final HbaseColumnFamily.ApplicationTraceIndexTrace INDEX = HbaseColumnFamily.APPLICATION_TRACE_INDEX_TRACE;
+    private static final HbaseColumnFamily.ApplicationTraceIndexTrace META = HbaseColumnFamily.APPLICATION_TRACE_INDEX_META;
 
-    @Autowired
-    @Qualifier("applicationTraceIndexDistributor")
-    private AbstractRowKeyDistributor rowKeyDistributor;
+    private final HbasePutWriter putWriter;
+    private final TableNameProvider tableNameProvider;
+
+    private final RowKeyEncoder<SpanBo> applicationIndexRowKeyEncoder;
+
+
+    public HbaseApplicationTraceIndexDao(HbasePutWriter putWriter,
+                                         TableNameProvider tableNameProvider,
+                                         @Qualifier("applicationIndexRowKeyEncoder") RowKeyEncoder<SpanBo> applicationIndexRowKeyEncoder) {
+        this.putWriter = Objects.requireNonNull(putWriter, "putWriter");
+        this.tableNameProvider = Objects.requireNonNull(tableNameProvider, "tableNameProvider");
+        this.applicationIndexRowKeyEncoder = Objects.requireNonNull(applicationIndexRowKeyEncoder, "applicationIndexRowKeyEncoder");
+        logger.info("ApplicationIndexRowKeyEncoder:{}", applicationIndexRowKeyEncoder);
+    }
 
     @Override
     public void insert(final SpanBo span) {
-        if (span == null) {
-            throw new NullPointerException("span must not be null");
+        Objects.requireNonNull(span, "span");
+
+        if (logger.isDebugEnabled()) {
+            logger.debug("insert ApplicationTraceIndex: {}", span);
         }
 
-        final Buffer buffer = new AutomaticBuffer(10 + HbaseTableConstatns.AGENT_NAME_MAX_LEN);
+        // Assert agentId
+        CollectorUtils.checkAgentId(span.getAgentId());
+        // Assert applicationName
+        CollectorUtils.checkApplicationName(span.getApplicationId());
+
+        final long acceptedTime = span.getCollectorAcceptTime();
+        final byte[] distributedKey = applicationIndexRowKeyEncoder.encodeRowKey(span);
+
+        final Put put = new Put(distributedKey, true);
+
+        final byte[] qualifier = SpanUtils.getVarTransactionId(span);
+
+        final byte[] indexValue = buildIndexValue(span);
+        put.addColumn(INDEX.getName(), qualifier, acceptedTime, indexValue);
+
+        final byte[] metaDataValue = buildMetaData(span);
+        put.addColumn(META.getName(), qualifier, metaDataValue);
+
+        final TableName applicationTraceIndexTableName = tableNameProvider.getTableName(INDEX.getTable());
+        putWriter.put(applicationTraceIndexTableName, put);
+    }
+
+    private byte[] buildIndexValue(SpanBo span) {
+        final Buffer buffer = new AutomaticBuffer(10 + HbaseTableConstants.AGENT_ID_MAX_LEN);
         buffer.putVInt(span.getElapsed());
         buffer.putSVInt(span.getErrCode());
         buffer.putPrefixedString(span.getAgentId());
-        final byte[] value = buffer.getBuffer();
-
-        final long acceptedTime = acceptedTimeService.getAcceptedTime();
-        final byte[] distributedKey = createRowKey(span, acceptedTime);
-        final Put put = new Put(distributedKey);
-
-        put.addColumn(getColumnFamilyName(), makeQualifier(span) , acceptedTime, value);
-
-        final TableName applicationTraceIndexTableName = getTableName();
-        boolean success = hbaseTemplate.asyncPut(applicationTraceIndexTableName, put);
-        if (!success) {
-            hbaseTemplate.put(applicationTraceIndexTableName, put);
-        }
+        return buffer.getBuffer();
     }
 
-    private byte[] makeQualifier(final SpanBo span) {
-        final byte[] qualifier = SpanUtils.getVarTransactionId(span);
-        return qualifier;
-    }
+    /**
+     * DotMetaData.Builder.read();
+     */
+    private byte[] buildMetaData(SpanBo span) {
+        Buffer buffer = new AutomaticBuffer(64);
+        buffer.putByte((byte) 0);
+        buffer.putLong(span.getSpanId());
+        buffer.putLong(span.getStartTime());
+        // fixed field offset
+        buffer.setByte(0, (byte) buffer.getOffset());
 
-    private byte[] createRowKey(SpanBo span, long acceptedTime) {
-        // distribute key evenly
-        final byte[] applicationTraceIndexRowKey = SpanUtils.getApplicationTraceIndexRowKey(span.getApplicationId(), acceptedTime);
-        return rowKeyDistributor.getDistributedKey(applicationTraceIndexRowKey);
-    }
+        buffer.putPrefixedString(span.getRpc());
+        buffer.putPrefixedString(span.getRemoteAddr());
+        buffer.putPrefixedString(span.getEndPoint());
+        buffer.putPrefixedString(span.getAgentName());
 
-    @Override
-    public HbaseColumnFamily getColumnFamily() {
-        return HbaseColumnFamily.APPLICATION_TRACE_INDEX_TRACE;
+        return buffer.getBuffer();
     }
 
 }

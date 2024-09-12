@@ -18,42 +18,34 @@ package com.navercorp.pinpoint.web.applicationmap.rawdata;
 
 
 import com.navercorp.pinpoint.common.trace.ServiceType;
-import com.navercorp.pinpoint.web.util.TimeWindow;
+import com.navercorp.pinpoint.common.server.util.timewindow.TimeWindowFunction;
 import com.navercorp.pinpoint.web.vo.Application;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.Objects;
 
 /**
- * application caller/callee relationship stored in DB
+ * application Out/In relationship stored in DB
  *
  * @author netspider
  * @author emeroad
  */
 public class LinkData {
-    private final Logger logger = LoggerFactory.getLogger(this.getClass());
 
     private final Application fromApplication;
     private final Application toApplication;
 
     private LinkCallDataMap linkCallDataMap;
-    private final TimeWindow timeWindow;
+    private final TimeWindowFunction timeWindow;
 
     public LinkData(Application fromApplication, Application toApplication) {
-        this(fromApplication, toApplication, null);
+        this(fromApplication, toApplication, TimeWindowFunction.identity());
     }
-    public LinkData(Application fromApplication, Application toApplication, TimeWindow timeWindow) {
-        if (fromApplication == null) {
-            throw new NullPointerException("fromApplication must not be null");
-        }
-        if (toApplication == null) {
-            throw new NullPointerException("toApplication must not be null");
-        }
 
-        this.fromApplication = fromApplication;
-        this.toApplication = toApplication;
+    public LinkData(Application fromApplication, Application toApplication, TimeWindowFunction timeWindow) {
+        this.fromApplication = Objects.requireNonNull(fromApplication, "fromApplication");
+        this.toApplication = Objects.requireNonNull(toApplication, "toApplication");
 
-        this.timeWindow = timeWindow;
+        this.timeWindow = Objects.requireNonNull(timeWindow, "timeWindow");
         this.linkCallDataMap = new LinkCallDataMap(timeWindow);
     }
 
@@ -65,9 +57,8 @@ public class LinkData {
      * @param count
      */
     public void addLinkData(String callerAgentId, ServiceType callerServiceTypeCode, String hostname, ServiceType serviceTypeCode, long timestamp, short slot, long count) {
-        if (hostname == null) {
-            throw new NullPointerException("hostname must not be null");
-        }
+        Objects.requireNonNull(hostname, "hostname");
+
         this.linkCallDataMap.addCallData(callerAgentId, callerServiceTypeCode, hostname, serviceTypeCode, timestamp, slot, count);
     }
 
@@ -93,17 +84,16 @@ public class LinkData {
     }
 
     public AgentHistogramList getTargetList() {
-        return linkCallDataMap.getTargetList();
+        return linkCallDataMap.getOutLinkList();
     }
 
     public AgentHistogramList getSourceList() {
-        return linkCallDataMap.getSourceList();
+        return linkCallDataMap.getInLinkList();
     }
 
     public void add(final LinkData linkData) {
-        if (linkData == null) {
-            throw new NullPointerException("linkData must not be null");
-        }
+        Objects.requireNonNull(linkData, "linkData");
+
         if (!this.equals(linkData)) {
             throw new IllegalArgumentException("Can't merge with different link.");
         }

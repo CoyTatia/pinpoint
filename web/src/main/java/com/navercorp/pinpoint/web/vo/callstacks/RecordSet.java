@@ -32,6 +32,7 @@ public class RecordSet {
     private long beginTimestamp;
 
     private String agentId;
+    private String agentName;
     private String applicationId;
     
     private boolean loggingTransactionInfo;
@@ -87,13 +88,20 @@ public class RecordSet {
         return beginTimestamp;
     }
 
-
     public String getAgentId() {
         return agentId;
     }
 
     public void setAgentId(String agentId) {
         this.agentId = agentId;
+    }
+
+    public String getAgentName() {
+        return agentName;
+    }
+
+    public void setAgentName(String agentName) {
+        this.agentName = agentName;
     }
 
     public String getApplicationId() {

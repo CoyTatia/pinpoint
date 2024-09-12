@@ -26,19 +26,17 @@ import com.navercorp.pinpoint.common.server.bo.codec.stat.strategy.StrategyAnaly
 import com.navercorp.pinpoint.common.server.bo.codec.stat.strategy.UnsignedLongEncodingStrategy;
 import com.navercorp.pinpoint.common.server.bo.codec.strategy.EncodingStrategy;
 import com.navercorp.pinpoint.common.server.bo.stat.FileDescriptorBo;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.util.Assert;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * @author Roy Kim
  */
-@Component("fileDescriptorCodecV2")
+@Component
 public class FileDescriptorCodecV2 extends AgentStatCodecV2<FileDescriptorBo> {
 
-    @Autowired
     public FileDescriptorCodecV2(AgentStatDataPointCodec codec) {
         super(new FileDescriptorCodecFactory(codec));
     }
@@ -49,8 +47,7 @@ public class FileDescriptorCodecV2 extends AgentStatCodecV2<FileDescriptorBo> {
         private final AgentStatDataPointCodec codec;
 
         private FileDescriptorCodecFactory(AgentStatDataPointCodec codec) {
-            Assert.notNull(codec, "codec must not be null");
-            this.codec = codec;
+            this.codec = Objects.requireNonNull(codec, "codec");
         }
 
         @Override
@@ -75,8 +72,7 @@ public class FileDescriptorCodecV2 extends AgentStatCodecV2<FileDescriptorBo> {
         private final UnsignedLongEncodingStrategy.Analyzer.Builder openFileDescriptorCountAnalyzerBuilder = new UnsignedLongEncodingStrategy.Analyzer.Builder();
 
         public FileDescriptorCodecEncoder(AgentStatDataPointCodec codec) {
-            Assert.notNull(codec, "codec must not be null");
-            this.codec = codec;
+            this.codec = Objects.requireNonNull(codec, "codec");
         }
 
         @Override
@@ -107,8 +103,7 @@ public class FileDescriptorCodecV2 extends AgentStatCodecV2<FileDescriptorBo> {
         private List<Long> openFileDescriptorCounts;
 
         public FileDescriptorCodecDecoder(AgentStatDataPointCodec codec) {
-            Assert.notNull(codec, "codec must not be null");
-            this.codec = codec;
+            this.codec = Objects.requireNonNull(codec, "codec");
         }
 
         @Override

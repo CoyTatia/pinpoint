@@ -22,7 +22,7 @@ import com.navercorp.pinpoint.common.trace.ServiceType;
 /**
  * @author jaehong.kim
  */
-public abstract class BaseRecord implements Record{
+public abstract class BaseRecord implements Record {
     protected int tab;
     protected int id;
     protected int parentId;
@@ -32,12 +32,15 @@ public abstract class BaseRecord implements Record{
     protected long begin;
     protected long elapsed;
     protected long gap;
-    protected String agent;
+    protected String agentId;
+    protected String agentName;
     protected String applicationName;
-    protected ServiceType serviceType;
+    protected ServiceType applicationServiceType;
+    protected ServiceType apiServiceType;
     protected String destinationId;
     protected boolean hasChild;
     protected boolean hasException;
+    protected long exceptionChainId;
     protected String transactionId;
     protected long spanId;
     protected long executionMilliseconds;
@@ -48,6 +51,9 @@ public abstract class BaseRecord implements Record{
     protected boolean focused;
     protected String simpleClassName = "";
     protected String fullApiDescription = "";
+
+    protected int lineNumber = 0;
+    protected String location = "";
 
     public int getId() {
         return id;
@@ -60,15 +66,12 @@ public abstract class BaseRecord implements Record{
     public int getTab() {
         return tab;
     }
+
     public String getTabspace() {
-        if(tab == 0) {
+        if (tab == 0) {
             return "";
         }
-        StringBuilder sb = new StringBuilder();
-        for(int i=0; i< tab; i++) {
-            sb.append("&nbsp");
-        }
-        return sb.toString();
+        return "&nbsp".repeat(Math.max(0, tab));
     }
 
     public boolean isMethod() {
@@ -95,26 +98,38 @@ public abstract class BaseRecord implements Record{
         return gap;
     }
 
-    public String getAgent() {
-        return agent;
+    public String getAgentId() {
+        return agentId;
+    }
+
+    @Override
+    public String getAgentName() {
+        return agentName;
     }
 
     public String getApplicationName() {
         return applicationName;
     }
 
+    public String getApplicationServiceType() {
+        if (applicationServiceType == null) {
+            return "";
+        }
+        return applicationServiceType.getName();
+    }
+
     public String getApiType() {
         if (destinationId == null) {
-            if (serviceType == null) {
+            if (apiServiceType == null) {
                 // no ServiceType when parameter
                 return "";
             }
-            return serviceType.getDesc();
+            return apiServiceType.getDesc();
         }
-        if (serviceType.isIncludeDestinationId()) {
-            return serviceType.getDesc() + "(" + destinationId + ")";
+        if (apiServiceType.isIncludeDestinationId()) {
+            return apiServiceType.getDesc() + "(" + destinationId + ")";
         } else {
-            return serviceType.getDesc();
+            return apiServiceType.getDesc();
         }
 
     }
@@ -155,6 +170,10 @@ public abstract class BaseRecord implements Record{
         return hasException;
     }
 
+    public long getExceptionChainId() {
+        return exceptionChainId;
+    }
+
     public String getTransactionId() {
         return transactionId;
     }
@@ -175,58 +194,46 @@ public abstract class BaseRecord implements Record{
         return this.isAuthorized;
     }
 
+    public int getLineNumber() {
+        return lineNumber;
+    }
+
+    public String getLocation() {
+        return location;
+    }
+
     @Override
     public String toString() {
-        StringBuilder builder = new StringBuilder();
-        builder.append("{tab=");
-        builder.append(tab);
-        builder.append(", id=");
-        builder.append(id);
-        builder.append(", parentId=");
-        builder.append(parentId);
-        builder.append(", method=");
-        builder.append(method);
-        builder.append(", title=");
-        builder.append(title);
-        builder.append(", simpleClassName=");
-        builder.append(simpleClassName);
-        builder.append(", fullApiDescription=");
-        builder.append(fullApiDescription);
-        builder.append(", arguments=");
-        builder.append(arguments);
-        builder.append(", begin=");
-        builder.append(begin);
-        builder.append(", elapsed=");
-        builder.append(elapsed);
-        builder.append(", gap=");
-        builder.append(gap);
-        builder.append(", executionMilliseconds=");
-        builder.append(executionMilliseconds);
-        builder.append(", agent=");
-        builder.append(agent);
-        builder.append(", applicationName=");
-        builder.append(applicationName);
-        builder.append(", serviceType=");
-        builder.append(serviceType);
-        builder.append(", destinationId=");
-        builder.append(destinationId);
-        builder.append(", excludeFromTimeline=");
-        builder.append(excludeFromTimeline);
-        builder.append(", transactionId=");
-        builder.append(transactionId);
-        builder.append(", spanId=");
-        builder.append(spanId);
-        builder.append(", focused=");
-        builder.append(focused);
-        builder.append(", hasChild=");
-        builder.append(hasChild);
-        builder.append(", hasException=");
-        builder.append(hasException);
-        builder.append(", methodTypeEnum=");
-        builder.append(methodTypeEnum);
-        builder.append(", isAuthorized=");
-        builder.append(isAuthorized);
-        builder.append("}");
-        return builder.toString();
+        return "BaseRecord{" +
+                "tab=" + tab +
+                ", id=" + id +
+                ", parentId=" + parentId +
+                ", method=" + method +
+                ", title='" + title + '\'' +
+                ", arguments='" + arguments + '\'' +
+                ", begin=" + begin +
+                ", elapsed=" + elapsed +
+                ", gap=" + gap +
+                ", agentId='" + agentId + '\'' +
+                ", agentName='" + agentName + '\'' +
+                ", applicationName='" + applicationName + '\'' +
+                ", applicationServiceType=" + applicationServiceType +
+                ", apiServiceType=" + apiServiceType +
+                ", destinationId='" + destinationId + '\'' +
+                ", hasChild=" + hasChild +
+                ", hasException=" + hasException +
+                ", exceptionChainId=" + exceptionChainId +
+                ", transactionId='" + transactionId + '\'' +
+                ", spanId=" + spanId +
+                ", executionMilliseconds=" + executionMilliseconds +
+                ", methodTypeEnum=" + methodTypeEnum +
+                ", isAuthorized=" + isAuthorized +
+                ", excludeFromTimeline=" + excludeFromTimeline +
+                ", focused=" + focused +
+                ", simpleClassName='" + simpleClassName + '\'' +
+                ", fullApiDescription='" + fullApiDescription + '\'' +
+                ", lineNumber=" + lineNumber +
+                ", location='" + location + '\'' +
+                '}';
     }
 }
